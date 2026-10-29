@@ -1,3 +1,988 @@
+diff --git a/src/actions/ui/queue/QueueBundleSelectionActions.ts b/src/actions/ui/queue/QueueBundleSelectionActions.ts
+new file mode 100644
+index 0000000..df36af4
+--- /dev/null
++++ b/src/actions/ui/queue/QueueBundleSelectionActions.ts
+@@ -0,0 +1,170 @@
++import QueueConstants from '@/constants/QueueConstants';
++import IconConstants from '@/constants/IconConstants';
++import { PriorityEnum } from '@/constants/PriorityConstants';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++
++import { APISocket } from '@/services/SocketService';
++import { setBundlePriority } from '@/services/api/QueueApi';
++import { TableSelectionStore } from '@/components/table/selection';
++
++// Actions for the bundles selected in the queue table (bulk actions)
++
++export interface QueueBundleSelectionData {
++  // Required for menu item data
++  id: string;
++
++  // Description of the selection (e.g. "3 bundles"), used in confirmations and notifications
++  name: string;
++
++  bundles: API.QueueBundle[];
++  selection: TableSelectionStore<API.QueueBundle>;
++}
++
++type Handler = UI.ActionHandler<QueueBundleSelectionData>;
++type Filter = UI.ActionFilter<QueueBundleSelectionData>;
++
++const isUnfinished = (bundle: API.QueueBundle) => bundle.time_finished === 0;
++
++const hasUnfinished: Filter = ({ itemData }) => itemData.bundles.some(isUnfinished);
++
++// Runs the task for each of the bundles. Bundles that were handled successfully are removed
++// from the selection so that a failed action can be retried for the remaining ones.
++const runForBundles = async (
++  { bundles, selection }: QueueBundleSelectionData,
++  task: (bundle: API.QueueBundle) => Promise<unknown>,
++) => {
++  const failures: { bundle: API.QueueBundle; error: Error }[] = [];
++
++  for (const bundle of bundles) {
++    try {
++      await task(bundle);
++      selection.setSelected(bundle, false);
++    } catch (e) {
++      failures.push({ bundle, error: e as Error });
++    }
++  }
++
++  if (failures.length > 0) {
++    const names = failures.map(({ bundle }) => bundle.name).join(', ');
++    throw new Error(
++      `Failed for ${failures.length}/${bundles.length} bundles (${names}): ${failures[0].error.message}`,
++    );
++  }
++};
++
++const removeBundle = (
++  socket: APISocket,
++  bundle: API.QueueBundle,
++  removeFinished: boolean,
++) => {
++  return socket.post(`${QueueConstants.BUNDLES_URL}/${bundle.id}/remove`, {
++    remove_finished: removeFinished,
++  });
++};
++
++const handleRemove: Handler = ({ itemData, socket }, removeFinished) => {
++  return runForBundles(itemData, (bundle) =>
++    removeBundle(socket, bundle, removeFinished === true),
++  );
++};
++
++const handleSearchAlternates: Handler = ({ itemData, socket }) => {
++  return runForBundles(
++    { ...itemData, bundles: itemData.bundles.filter(isUnfinished) },
++    (bundle) => socket.post(`${QueueConstants.BUNDLES_URL}/${bundle.id}/search`),
++  );
++};
++
++const createPriorityHandler = (priority: API.QueuePriorityEnum): Handler => {
++  return ({ itemData, socket }) => {
++    // Priorities can't be changed for finished bundles
++    return runForBundles(
++      { ...itemData, bundles: itemData.bundles.filter(isUnfinished) },
++      (bundle) => setBundlePriority(bundle, priority, socket),
++    );
++  };
++};
++
++export const QueueBundleSelectionRemoveAction = {
++  id: 'removeSelected',
++  displayName: 'Remove selected bundles',
++  access: API.AccessEnum.QUEUE_EDIT,
++  icon: IconConstants.REMOVE,
++  confirmation: {
++    content: 'Are you sure that you want to remove {{item.name}}?',
++    approveCaption: 'Remove bundles',
++    rejectCaption: `Don't remove`,
++    checkboxCaption: 'Remove finished files',
++  },
++  handler: handleRemove,
++  notifications: {
++    onSuccess: '{{item.name}} were removed',
++  },
++};
++
++export const QueueBundleSelectionSearchAlternatesAction = {
++  id: 'searchAlternatesSelected',
++  displayName: 'Search alternates for selected',
++  access: API.AccessEnum.QUEUE_EDIT,
++  icon: IconConstants.SEARCH_ALTERNATES,
++  filter: hasUnfinished,
++  handler: handleSearchAlternates,
++  notifications: {
++    onSuccess: '{{item.name}} were searched for alternates',
++  },
++};
++
++const createPriorityAction = (
++  id: string,
++  displayName: string,
++  priority: API.QueuePriorityEnum,
++): UI.ActionDefinition<QueueBundleSelectionData> => ({
++  id,
++  displayName,
++  access: API.AccessEnum.QUEUE_EDIT,
++  filter: hasUnfinished,
++  handler: createPriorityHandler(priority),
++});
++
++// Same priorities as in the priority menu of the table (highest first)
++const priorityActions: UI.ChildActionListType<QueueBundleSelectionData, void> = {};
++Object.keys(PriorityEnum)
++  .map(Number)
++  .sort((a, b) => b - a)
++  .forEach((priorityId) => {
++    priorityActions[`priority${priorityId}`] = createPriorityAction(
++      `priority${priorityId}`,
++      PriorityEnum[priorityId as keyof typeof PriorityEnum].str,
++      priorityId,
++    );
++  });
++
++priorityActions.priorityAuto = createPriorityAction(
++  'priorityAuto',
++  'Auto',
++  API.QueuePriorityEnum.DEFAULT,
++);
++
++const QueueBundleSelectionActions: UI.ActionListType<QueueBundleSelectionData> = {
++  priority: {
++    id: 'priority',
++    displayName: 'Set priority of selected',
++    icon: IconConstants.SETTINGS,
++    children: priorityActions,
++  },
++  searchAlternates: QueueBundleSelectionSearchAlternatesAction,
++  divider: null,
++  remove: QueueBundleSelectionRemoveAction,
++};
++
++export const QueueBundleSelectionActionModule = {
++  moduleId: UI.Modules.QUEUE,
++  subId: 'selection',
++};
++
++export const QueueBundleSelectionActionMenu = {
++  moduleData: QueueBundleSelectionActionModule,
++  actions: QueueBundleSelectionActions,
++} as UI.ModuleActions<QueueBundleSelectionData>;
+diff --git a/src/actions/ui/queue/__tests__/QueueBundleSelectionActions.node.test.ts b/src/actions/ui/queue/__tests__/QueueBundleSelectionActions.node.test.ts
+new file mode 100644
+index 0000000..2e77c8c
+--- /dev/null
++++ b/src/actions/ui/queue/__tests__/QueueBundleSelectionActions.node.test.ts
+@@ -0,0 +1,175 @@
++import { describe, expect, it, vi } from 'vitest';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { TableSelectionStore } from '@/components/table/selection';
++
++import {
++  QueueBundleSelectionActionMenu,
++  QueueBundleSelectionData,
++  QueueBundleSelectionRemoveAction,
++  QueueBundleSelectionSearchAlternatesAction,
++} from '../QueueBundleSelectionActions';
++
++const createBundle = (id: number, finished: boolean): API.QueueBundle =>
++  ({
++    id,
++    name: `bundle${id}`,
++    time_finished: finished ? 1000 : 0,
++  }) as API.QueueBundle;
++
++const active1 = createBundle(1, false);
++const active2 = createBundle(2, false);
++const finished = createBundle(3, true);
++
++const createData = (bundles: API.QueueBundle[]) => {
++  const selection = new TableSelectionStore<API.QueueBundle>();
++  bundles.forEach((bundle) => selection.setSelected(bundle, true));
++
++  const data: QueueBundleSelectionData = {
++    id: 'selection',
++    name: `${bundles.length} bundles`,
++    bundles,
++    selection,
++  };
++
++  return { data, selection };
++};
++
++const createSocket = (failIds: number[] = []) => ({
++  post: vi.fn(async (url: string, _body?: unknown) => {
++    const id = Number(url.split('/')[2]);
++    if (failIds.includes(id)) {
++      throw new Error('failed');
++    }
++  }),
++});
++
++const run = (
++  action: UI.ActionDefinition<QueueBundleSelectionData>,
++  data: QueueBundleSelectionData,
++  socket: ReturnType<typeof createSocket>,
++  confirmData?: boolean,
++) => action.handler({ itemData: data, socket, entity: undefined } as any, confirmData);
++
++const priorityChildren = (
++  QueueBundleSelectionActionMenu.actions.priority as UI.GroupedActionDefition<
++    QueueBundleSelectionData,
++    void
++  >
++).children;
++
++describe('queue bundle selection actions', () => {
++  describe('remove', () => {
++    it('removes all selected bundles and clears the selection', async () => {
++      const { data, selection } = createData([active1, finished]);
++      const socket = createSocket();
++
++      await run(QueueBundleSelectionRemoveAction, data, socket, false);
++
++      expect(socket.post.mock.calls).toEqual([
++        ['queue/bundles/1/remove', { remove_finished: false }],
++        ['queue/bundles/3/remove', { remove_finished: false }],
++      ]);
++      expect(selection.getItems()).toEqual([]);
++    });
++
++    it('passes the finished files option', async () => {
++      const { data } = createData([active1]);
++      const socket = createSocket();
++
++      await run(QueueBundleSelectionRemoveAction, data, socket, true);
++      expect(socket.post).toHaveBeenCalledWith('queue/bundles/1/remove', {
++        remove_finished: true,
++      });
++    });
++
++    it('keeps the failed bundles selected and reports them', async () => {
++      const { data, selection } = createData([active1, active2, finished]);
++      const socket = createSocket([2]);
++
++      await expect(
++        run(QueueBundleSelectionRemoveAction, data, socket, false),
++      ).rejects.toThrow('Failed for 1/3 bundles (bundle2): failed');
++
++      expect(socket.post).toHaveBeenCalledTimes(3);
++      expect(selection.getItems()).toEqual([active2]);
++    });
++  });
++
++  describe('priority', () => {
++    it('sets the priority only for unfinished bundles', async () => {
++      const { data, selection } = createData([active1, finished, active2]);
++      const socket = createSocket();
++
++      await run(priorityChildren.priority6 as UI.ActionDefinition<any>, data, socket);
++
++      expect(socket.post.mock.calls).toEqual([
++        ['queue/bundles/1/priority', { priority: API.QueuePriorityEnum.HIGHEST }],
++        ['queue/bundles/2/priority', { priority: API.QueuePriorityEnum.HIGHEST }],
++      ]);
++
++      // The finished bundle wasn't handled, so it stays selected
++      expect(selection.getItems()).toEqual([finished]);
++    });
++
++    it('supports the auto priority and pausing', async () => {
++      const { data } = createData([active1]);
++      const socket = createSocket();
++
++      await run(priorityChildren.priorityAuto as UI.ActionDefinition<any>, data, socket);
++      await run(priorityChildren.priority0 as UI.ActionDefinition<any>, data, socket);
++
++      expect(socket.post.mock.calls.map(([, body]) => body)).toEqual([
++        { priority: API.QueuePriorityEnum.DEFAULT },
++        { priority: API.QueuePriorityEnum.PAUSED_FORCED },
++      ]);
++    });
++
++    it('lists the priorities from highest to lowest, followed by auto', () => {
++      expect(Object.keys(priorityChildren)).toEqual([
++        'priority6',
++        'priority5',
++        'priority4',
++        'priority3',
++        'priority2',
++        'priority1',
++        'priority0',
++        'priorityAuto',
++      ]);
++    });
++
++    it('is hidden when only finished bundles are selected', () => {
++      const action = priorityChildren.priority4 as UI.ActionDefinition<any>;
++      expect(
++        action.filter!({ itemData: createData([finished]).data, entity: undefined }),
++      ).toBe(false);
++      expect(
++        action.filter!({
++          itemData: createData([finished, active1]).data,
++          entity: undefined,
++        }),
++      ).toBe(true);
++    });
++  });
++
++  describe('search for alternates', () => {
++    it('searches only the unfinished bundles', async () => {
++      const { data } = createData([active1, finished]);
++      const socket = createSocket();
++
++      await run(QueueBundleSelectionSearchAlternatesAction, data, socket);
++      expect(socket.post.mock.calls).toEqual([['queue/bundles/1/search']]);
++    });
++  });
++
++  it('requires queue edit access for all actions', () => {
++    expect(QueueBundleSelectionRemoveAction.access).toBe(API.AccessEnum.QUEUE_EDIT);
++    expect(QueueBundleSelectionSearchAlternatesAction.access).toBe(
++      API.AccessEnum.QUEUE_EDIT,
++    );
++    Object.values(priorityChildren).forEach((action) =>
++      expect((action as UI.ActionDefinition<any>).access).toBe(API.AccessEnum.QUEUE_EDIT),
++    );
++  });
++});
+diff --git a/src/actions/ui/queue/index.ts b/src/actions/ui/queue/index.ts
+index fa3b6a1..95b1630 100644
+--- a/src/actions/ui/queue/index.ts
++++ b/src/actions/ui/queue/index.ts
+@@ -3,3 +3,4 @@ export * from './QueueBundleActions';
+ export * from './QueueBundleSourceActions';
+ export * from './QueueFileActions';
+ export * from './QueueSourceActions';
++export * from './QueueBundleSelectionActions';
+diff --git a/src/actions/ui/search/SearchSelectionActions.ts b/src/actions/ui/search/SearchSelectionActions.ts
+new file mode 100644
+index 0000000..4902efa
+--- /dev/null
++++ b/src/actions/ui/search/SearchSelectionActions.ts
+@@ -0,0 +1,56 @@
++import IconConstants from '@/constants/IconConstants';
++
++import * as UI from '@/types/ui';
++
++// Actions for the search results selected in the result table
++
++export interface SearchSelectionData {
++  // Required for menu item data
++  id: string;
++
++  // Description of the selection (e.g. "3 results")
++  name: string;
++
++  // Download to the default directory
++  download: () => Promise<unknown>;
++
++  // Open the download dialog for choosing the directory
++  downloadTo: () => void;
++}
++
++type Handler = UI.ActionHandler<SearchSelectionData>;
++
++const handleDownload: Handler = ({ itemData }) => itemData.download();
++
++const handleDownloadTo: Handler = ({ itemData }) => {
++  itemData.downloadTo();
++};
++
++export const SearchSelectionDownloadAction = {
++  id: 'downloadSelected',
++  displayName: 'Download selected',
++  icon: IconConstants.DOWNLOAD,
++  handler: handleDownload,
++};
++
++export const SearchSelectionDownloadToAction = {
++  id: 'downloadSelectedTo',
++  displayName: 'Download selected to...',
++  icon: IconConstants.FOLDER,
++  handler: handleDownloadTo,
++};
++
++const SearchSelectionActions: UI.ActionListType<SearchSelectionData> = {
++  download: SearchSelectionDownloadAction,
++  downloadTo: SearchSelectionDownloadToAction,
++};
++
++export const SearchSelectionActionModule = {
++  moduleId: UI.Modules.SEARCH,
++  subId: 'selection',
++};
++
++export const SearchSelectionActionMenu = {
++  moduleData: SearchSelectionActionModule,
++  actions: SearchSelectionActions,
++} as UI.ModuleActions<SearchSelectionData>;
+diff --git a/src/actions/ui/search/__tests__/SearchSelectionActions.node.test.ts b/src/actions/ui/search/__tests__/SearchSelectionActions.node.test.ts
+new file mode 100644
+index 0000000..42a8578
+--- /dev/null
++++ b/src/actions/ui/search/__tests__/SearchSelectionActions.node.test.ts
+@@ -0,0 +1,45 @@
++import { describe, expect, it, vi } from 'vitest';
++
++import {
++  SearchSelectionData,
++  SearchSelectionDownloadAction,
++  SearchSelectionDownloadToAction,
++} from '../SearchSelectionActions';
++
++const createData = (): SearchSelectionData => ({
++  id: 'selection',
++  name: '2 results',
++  download: vi.fn(async () => undefined),
++  downloadTo: vi.fn(),
++});
++
++const run = (
++  action: typeof SearchSelectionDownloadAction,
++  itemData: SearchSelectionData,
++) =>
++  action.handler({
++    itemData,
++    entity: undefined,
++    socket: {},
++  } as unknown as Parameters<typeof action.handler>[0]);
++
++describe('SearchSelectionActions', () => {
++  it('downloads the selection to the default directory', async () => {
++    const data = createData();
++    await run(SearchSelectionDownloadAction, data);
++
++    expect(data.download).toHaveBeenCalledTimes(1);
++    expect(data.downloadTo).not.toHaveBeenCalled();
++  });
++
++  it('opens the directory selection', async () => {
++    const data = createData();
++    await run(
++      SearchSelectionDownloadToAction as typeof SearchSelectionDownloadAction,
++      data,
++    );
++
++    expect(data.downloadTo).toHaveBeenCalledTimes(1);
++    expect(data.download).not.toHaveBeenCalled();
++  });
++});
+diff --git a/src/actions/ui/search/index.ts b/src/actions/ui/search/index.ts
+index 9e9bc76..82266e1 100644
+--- a/src/actions/ui/search/index.ts
++++ b/src/actions/ui/search/index.ts
+@@ -1,2 +1,3 @@
+ export * from './SearchActions';
+ export * from './SearchTypeActions';
++export * from './SearchSelectionActions';
+diff --git a/src/components/download/bulk/BulkDownload.ts b/src/components/download/bulk/BulkDownload.ts
+new file mode 100644
+index 0000000..0b0a66b
+--- /dev/null
++++ b/src/components/download/bulk/BulkDownload.ts
+@@ -0,0 +1,83 @@
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++
++import { TableSelectionStore } from '@/components/table/selection';
++
++// The download dialog is opened with an item ID in the route (download/:id).
++// For bulk downloads, this reserved ID is used instead of a real item ID.
++export const BULK_DOWNLOAD_ITEM_ID = 'bulk';
++
++export const isBulkDownloadRouteId = (itemId: API.IdType) =>
++  String(itemId) === BULK_DOWNLOAD_ITEM_ID;
++
++// The dialog receives the placeholder item (not the route ID) from the item getter.
++// Real paths always start with a slash so this can't match a real item.
++const BULK_PLACEHOLDER_PATH = '<bulk>';
++
++export const isBulkDownloadPlaceholder = (item: Pick<UI.DownloadableItemInfo, 'path'>) =>
++  item.path === BULK_PLACEHOLDER_PATH;
++
++// Placeholder item for the download dialog (it's used only for displaying the dialog).
++// Only the fields of DownloadableItemInfo are filled; other fields that the item type
++// may have are never read for the placeholder (the bulk handler replaces it with the real items).
++export const createBulkDownloadItem = <ItemT extends UI.DownloadableItemInfo>(
++  items: UI.DownloadableItemInfo[],
++  name: string,
++): ItemT => {
++  const placeholder: UI.DownloadableItemInfo = {
++    id: -1,
++    name,
++    path: BULK_PLACEHOLDER_PATH,
++    tth: '',
++    dupe: null,
++    time: 0,
++    size: items.reduce((total, item) => total + item.size, 0),
++    type: {
++      id: 'directory',
++      str: 'Directory',
++      files: items.filter((item) => item.type.id === 'file').length,
++      directories: items.filter((item) => item.type.id === 'directory').length,
++    },
++  };
++
++  return placeholder as ItemT;
++};
++
++// Wraps the regular download handler so that the placeholder item queues all selected items
++// to the chosen target directory. Items that were queued successfully are removed
++// from the selection, so that a failed download can be retried without duplicates.
++export const createBulkDownloadHandler = <ItemT extends UI.DownloadableItemInfo>(
++  selection: TableSelectionStore<ItemT>,
++  downloadHandler: UI.DownloadHandler<ItemT>,
++): UI.DownloadHandler<ItemT> => {
++  return async (itemData, downloadData, socket) => {
++    if (!isBulkDownloadPlaceholder(itemData.itemInfo)) {
++      return downloadHandler(itemData, downloadData, socket);
++    }
++
++    const items = selection.getItems();
++    const failures: { item: ItemT; error: Error }[] = [];
++
++    for (const item of items) {
++      try {
++        await downloadHandler(
++          { ...itemData, itemInfo: item },
++          // Each item needs its own name (the shared name belongs to the placeholder)
++          { ...downloadData, target_name: item.name },
++          socket,
++        );
++
++        selection.setSelected(item, false);
++      } catch (e) {
++        failures.push({ item, error: e as Error });
++      }
++    }
++
++    if (failures.length > 0) {
++      const names = failures.map(({ item }) => item.name).join(', ');
++      throw new Error(
++        `Failed to queue ${failures.length}/${items.length} items (${names}): ${failures[0].error.message}`,
++      );
++    }
++  };
++};
+diff --git a/src/components/download/bulk/__tests__/BulkDownload.node.test.ts b/src/components/download/bulk/__tests__/BulkDownload.node.test.ts
+new file mode 100644
+index 0000000..43280eb
+--- /dev/null
++++ b/src/components/download/bulk/__tests__/BulkDownload.node.test.ts
+@@ -0,0 +1,132 @@
++import { describe, expect, it, vi } from 'vitest';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { TableSelectionStore } from '@/components/table/selection';
++
++import {
++  BULK_DOWNLOAD_ITEM_ID,
++  createBulkDownloadHandler,
++  createBulkDownloadItem,
++  isBulkDownloadPlaceholder,
++  isBulkDownloadRouteId,
++} from '../BulkDownload';
++
++const createItem = (
++  id: number,
++  name: string,
++  type: 'file' | 'directory',
++  size = 100,
++): API.FilelistItem => ({
++  id,
++  name,
++  path: `/${name}`,
++  tth: `tth${id}`,
++  dupe: null,
++  time: 0,
++  size,
++  complete: true,
++  type:
++    type === 'file'
++      ? { id: 'file', str: 'File', content_type: 'video' as API.FileContentType }
++      : { id: 'directory', str: 'Directory', files: 0, directories: 0 },
++});
++
++const file1 = createItem(1, 'one.mkv', 'file', 100);
++const file2 = createItem(2, 'two.mkv', 'file', 200);
++const dir = createItem(3, 'folder', 'directory', 300);
++
++const socket = {} as any;
++const entity = undefined;
++const downloadData = {
++  target_name: 'placeholder',
++  target_directory: '/downloads/',
++  priority: API.QueuePriorityEnum.DEFAULT,
++} as API.DownloadData;
++
++const bulkItemData = (items: API.FilelistItem[]) => ({
++  itemInfo: createBulkDownloadItem<API.FilelistItem>(items, `${items.length} items`),
++  user: undefined,
++  entity,
++});
++
++describe('bulk download item', () => {
++  it('detects the reserved route ID', () => {
++    expect(isBulkDownloadRouteId(BULK_DOWNLOAD_ITEM_ID)).toBe(true);
++    expect(isBulkDownloadRouteId(1)).toBe(false);
++    expect(isBulkDownloadRouteId('1')).toBe(false);
++  });
++
++  it('detects the placeholder item but not real items', () => {
++    expect(
++      isBulkDownloadPlaceholder(
++        createBulkDownloadItem<API.FilelistItem>([file1], '1 item'),
++      ),
++    ).toBe(true);
++    [file1, file2, dir].forEach((item) =>
++      expect(isBulkDownloadPlaceholder(item)).toBe(false),
++    );
++  });
++
++  it('summarizes the selected items', () => {
++    const item = createBulkDownloadItem<API.FilelistItem>([file1, file2, dir], '3 items');
++    expect(item.name).toBe('3 items');
++    expect(item.size).toBe(600);
++    expect(item.type).toMatchObject({ id: 'directory', files: 2, directories: 1 });
++  });
++});
++
++describe('bulk download handler', () => {
++  it('passes regular items through to the wrapped handler', async () => {
++    const selection = new TableSelectionStore<API.FilelistItem>();
++    const inner = vi.fn().mockResolvedValue(undefined);
++    const handler = createBulkDownloadHandler(selection, inner);
++
++    const itemData = { itemInfo: file1, user: undefined, entity };
++    await handler(itemData, downloadData, socket);
++
++    expect(inner).toHaveBeenCalledTimes(1);
++    expect(inner).toHaveBeenCalledWith(itemData, downloadData, socket);
++  });
++
++  it('queues every selected item with its own name and clears the selection', async () => {
++    const selection = new TableSelectionStore<API.FilelistItem>();
++    [file1, file2, dir].forEach((item) => selection.setSelected(item, true));
++
++    const inner = vi.fn().mockResolvedValue(undefined);
++    const handler = createBulkDownloadHandler(selection, inner);
++
++    await handler(bulkItemData(selection.getItems()), downloadData, socket);
++
++    expect(inner).toHaveBeenCalledTimes(3);
++    expect(inner.mock.calls.map(([data]) => data.itemInfo)).toEqual([file1, file2, dir]);
++    expect(inner.mock.calls.map(([, dlData]) => dlData.target_name)).toEqual([
++      'one.mkv',
++      'two.mkv',
++      'folder',
++    ]);
++    inner.mock.calls.forEach(([, dlData]) =>
++      expect(dlData.target_directory).toBe('/downloads/'),
++    );
++    expect(selection.getItems()).toEqual([]);
++  });
++
++  it('keeps failed items selected and reports them', async () => {
++    const selection = new TableSelectionStore<API.FilelistItem>();
++    [file1, file2, dir].forEach((item) => selection.setSelected(item, true));
++
++    const inner: UI.DownloadHandler<API.FilelistItem> = vi.fn(async ({ itemInfo }) => {
++      if (itemInfo.id === file2.id) {
++        throw new Error('queue full');
++      }
++    });
++    const handler = createBulkDownloadHandler(selection, inner);
++
++    await expect(
++      handler(bulkItemData(selection.getItems()), downloadData, socket),
++    ).rejects.toThrow('Failed to queue 1/3 items (two.mkv): queue full');
++
++    expect(selection.getItems()).toEqual([file2]);
++    expect(inner).toHaveBeenCalledTimes(3);
++  });
++});
+diff --git a/src/components/download/bulk/__tests__/useBulkDownload.node.test.tsx b/src/components/download/bulk/__tests__/useBulkDownload.node.test.tsx
+new file mode 100644
+index 0000000..503eba0
+--- /dev/null
++++ b/src/components/download/bulk/__tests__/useBulkDownload.node.test.tsx
+@@ -0,0 +1,139 @@
++import * as React from 'react';
++import { beforeAll, describe, expect, it, vi } from 'vitest';
++import i18n from 'i18next';
++import { initReactI18next } from 'react-i18next';
++import { renderHook, waitFor } from '@testing-library/react';
++import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { TableSelectionStore } from '@/components/table/selection';
++
++import { SocketContext } from '@/context/SocketContext';
++import { APISocket } from '@/services/SocketService';
++
++import { useBulkDownload } from '../useBulkDownload';
++
++const createItem = (id: number, name: string, size: number): API.FilelistItem => ({
++  id,
++  name,
++  path: `/${name}`,
++  tth: `tth${id}`,
++  dupe: null,
++  time: 0,
++  size,
++  complete: true,
++  type: { id: 'file', str: 'File', content_type: 'video' as API.FileContentType },
++});
++
++const setup = () => {
++  const selection = new TableSelectionStore<API.FilelistItem>();
++  selection.setManySelected([createItem(1, 'a', 100), createItem(2, 'b', 200)]);
++
++  const itemDataGetter = vi.fn(async (id: string | number) =>
++    createItem(Number(id), 'x', 1),
++  );
++  const downloadHandler: UI.DownloadHandler<API.FilelistItem> = vi.fn();
++
++  let location: ReturnType<typeof useLocation> | undefined;
++  const LocationProbe = () => {
++    location = useLocation();
++    return null;
++  };
++
++  const socket = {} as APISocket;
++  const entity = { id: 'session1' } as UI.SessionItemBase;
++
++  const wrapper = ({ children }: React.PropsWithChildren) => (
++    <SocketContext value={socket}>
++      <MemoryRouter initialEntries={['/session']}>
++        <LocationProbe />
++        <Routes>
++          <Route path="/session/*" element={<>{children}</>} />
++        </Routes>
++      </MemoryRouter>
++    </SocketContext>
++  );
++
++  const hook = renderHook(
++    () => useBulkDownload({ selection, downloadHandler, itemDataGetter, entity }),
++    { wrapper },
++  );
++
++  return {
++    hook,
++    selection,
++    itemDataGetter,
++    downloadHandler,
++    socket,
++    entity,
++    getLocation: () => location!,
++  };
++};
++
++describe('useBulkDownload', () => {
++  beforeAll(async () => {
++    // Used for the interpolation of the default texts
++    await i18n.use(initReactI18next).init({
++      lng: 'en',
++      resources: {},
++      interpolation: { escapeValue: false },
++    });
++  });
++
++  it('returns a placeholder item for the bulk route ID', async () => {
++    const { hook, itemDataGetter } = setup();
++
++    const item = await hook.result.current.itemDataGetter('bulk', {} as any);
++    expect(item.name).toBe('2 items');
++    expect(item.size).toBe(300);
++    expect(itemDataGetter).not.toHaveBeenCalled();
++  });
++
++  it('delegates other item IDs to the original getter', async () => {
++    const { hook, itemDataGetter } = setup();
++
++    const item = await hook.result.current.itemDataGetter('5', {} as any);
++    expect(item.id).toBe(5);
++    expect(itemDataGetter).toHaveBeenCalledWith('5', {});
++  });
++
++  it('opens the download dialog route', async () => {
++    const { hook, getLocation } = setup();
++
++    hook.result.current.startDownloadTo();
++    await waitFor(() => expect(getLocation().pathname).toBe('/session/download/bulk'));
++  });
++
++  it('downloads the selected items without opening the dialog or setting a directory', async () => {
++    const { hook, selection, downloadHandler, socket, entity, getLocation } = setup();
++
++    await hook.result.current.startDownload();
++
++    expect(downloadHandler).toHaveBeenCalledTimes(2);
++    const calls = vi.mocked(downloadHandler).mock.calls;
++    expect(calls.map(([data]) => data.itemInfo.name)).toEqual(['a', 'b']);
++    calls.forEach(([data, downloadData, callSocket], index) => {
++      expect(data.entity).toBe(entity);
++      expect(callSocket).toBe(socket);
++      expect(downloadData.target_name).toBe(['a', 'b'][index]);
++      expect(downloadData).not.toHaveProperty('target_directory');
++    });
++
++    expect(selection.getItems()).toEqual([]);
++    expect(getLocation().pathname).toBe('/session');
++  });
++
++  it('keeps the items that failed to download selected', async () => {
++    const { hook, selection, downloadHandler } = setup();
++    vi.mocked(downloadHandler).mockImplementation(async ({ itemInfo }) => {
++      if (itemInfo.name === 'a') {
++        throw new Error('failed');
++      }
++    });
++
++    await hook.result.current.startDownload();
++
++    expect(selection.getItems().map((item) => item.name)).toEqual(['a']);
++  });
++});
+diff --git a/src/components/download/bulk/useBulkDownload.ts b/src/components/download/bulk/useBulkDownload.ts
+new file mode 100644
+index 0000000..a30edb7
+--- /dev/null
++++ b/src/components/download/bulk/useBulkDownload.ts
+@@ -0,0 +1,120 @@
++import * as React from 'react';
++import { useNavigate } from 'react-router';
++import { useTranslation } from 'react-i18next';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { toI18nKey } from '@/utils/TranslationUtils';
++
++import NotificationActions from '@/actions/NotificationActions';
++import { useSocket } from '@/context/SocketContext';
++import { TableSelectionStore } from '@/components/table/selection';
++
++import {
++  BULK_DOWNLOAD_ITEM_ID,
++  createBulkDownloadHandler,
++  createBulkDownloadItem,
++  isBulkDownloadRouteId,
++} from './BulkDownload';
++
++interface UseBulkDownloadProps<ItemT extends UI.DownloadableItemInfo> {
++  selection: TableSelectionStore<ItemT>;
++
++  // Handler for a single item
++  downloadHandler: UI.DownloadHandler<ItemT>;
++
++  // Getter for a single item
++  itemDataGetter: UI.DownloadItemDataGetter<ItemT>;
++
++  // Passed to the download handler by the direct download
++  // (the same values that are given to the download dialog)
++  entity?: UI.SessionItemBase;
++  user?: UI.DownloadSource;
++}
++
++// Adds support for downloading all selected items.
++//
++// - startDownload queues the items right away without a target directory
++//   (the default download directory of the application is used)
++// - startDownloadTo opens the regular download dialog for choosing the target directory.
++//   Pass the returned handler and getter to the DownloadDialog (in a route that is
++//   a parent of the 'download/:id' route) for this.
++export const useBulkDownload = <ItemT extends UI.DownloadableItemInfo>({
++  selection,
++  downloadHandler,
++  itemDataGetter,
++  entity,
++  user,
++}: UseBulkDownloadProps<ItemT>) => {
++  const { t } = useTranslation();
++  const navigate = useNavigate();
++  const socket = useSocket();
++
++  const bulkDownloadHandler = React.useMemo(
++    () => createBulkDownloadHandler(selection, downloadHandler),
++    [selection, downloadHandler],
++  );
++
++  const getItemCountCaption = (count: number) =>
++    t(toI18nKey('itemCount', UI.Modules.COMMON), {
++      defaultValue_one: '{{count}} item',
++      defaultValue_other: '{{count}} items',
++      count,
++      replace: { count },
++    });
++
++  const bulkItemDataGetter: UI.DownloadItemDataGetter<ItemT> = (itemId, socket) => {
++    if (isBulkDownloadRouteId(itemId)) {
++      const items = selection.getItems();
++      return Promise.resolve(
++        createBulkDownloadItem<ItemT>(items, getItemCountCaption(items.length)),
++      );
++    }
++
++    return itemDataGetter(itemId, socket);
++  };
++
++  const startDownloadTo = () => navigate(`download/${BULK_DOWNLOAD_ITEM_ID}`);
++
++  // Items that were queued successfully are removed from the selection (by the handler)
++  // so failed ones can be retried
++  const startDownload = async () => {
++    const items = selection.getItems();
++    if (items.length === 0) {
++      return;
++    }
++
++    const caption = getItemCountCaption(items.length);
++    const placeholder = createBulkDownloadItem<ItemT>(items, caption);
++
++    try {
++      await bulkDownloadHandler(
++        { itemInfo: placeholder, user, entity },
++        // No target directory
++        { target_name: placeholder.name, priority: API.QueuePriorityEnum.DEFAULT },
++        socket,
++      );
++
++      NotificationActions.info({
++        title: t(toI18nKey('bulkQueued', UI.Modules.COMMON), {
++          defaultValue: '{{items}} queued for download',
++          replace: { items: caption },
++        }),
++      });
++    } catch (e) {
++      NotificationActions.error({
++        title: t(toI18nKey('bulkQueueingFailed', UI.Modules.COMMON), {
++          defaultValue: 'Failed to queue the selected items',
++        }),
++        message: (e as Error).message,
++      });
++    }
++  };
++
++  return {
++    downloadHandler: bulkDownloadHandler,
++    itemDataGetter: bulkItemDataGetter,
++    startDownload,
++    startDownloadTo,
++  };
++};
 diff --git a/src/components/table/TableContainer.tsx b/src/components/table/TableContainer.tsx
 index cbf7c2d..e60aac4 100644
 --- a/src/components/table/TableContainer.tsx
@@ -179,10 +1164,10 @@ index 0000000..14d286b
 +};
 diff --git a/src/components/table/selection/SelectionBar.tsx b/src/components/table/selection/SelectionBar.tsx
 new file mode 100644
-index 0000000..ee5d574
+index 0000000..7303111
 --- /dev/null
 +++ b/src/components/table/selection/SelectionBar.tsx
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,73 @@
 +import * as React from 'react';
 +import { useTranslation } from 'react-i18next';
 +
@@ -198,12 +1183,22 @@ index 0000000..ee5d574
 +import './style.css';
 +
 +export interface SelectionBarProps {
-+  // Called when the download button is clicked
-+  onDownload: () => void;
++  // Displays a download button (downloads to the default directory) when set
++  onDownload?: () => void;
++
++  // Displays a button for choosing the download directory when set
++  onDownloadTo?: () => void;
++
++  // Additional actions (displayed after the download button)
++  children?: React.ReactNode;
 +}
 +
 +// Table footer content that is displayed when there are selected rows
-+export const SelectionBar: React.FC<SelectionBarProps> = ({ onDownload }) => {
++export const SelectionBar: React.FC<SelectionBarProps> = ({
++  onDownload,
++  onDownloadTo,
++  children,
++}) => {
 +  const { t } = useTranslation();
 +  const store = useTableSelectionStore<TableSelectionItem>();
 +  const selected = useSelectedItems();
@@ -220,12 +1215,23 @@ index 0000000..ee5d574
 +          replace: { count: selected.length },
 +        })}
 +      </span>
-+      <Button
-+        className="tiny"
-+        icon={IconConstants.DOWNLOAD}
-+        caption={translate('Download', t, UI.Modules.COMMON)}
-+        onClick={onDownload}
-+      />
++      {!!onDownload && (
++        <Button
++          className="tiny"
++          icon={IconConstants.DOWNLOAD}
++          caption={translate('Download', t, UI.Modules.COMMON)}
++          onClick={onDownload}
++        />
++      )}
++      {!!onDownloadTo && (
++        <Button
++          className="tiny"
++          icon={IconConstants.FOLDER}
++          caption={translate('Download to...', t, UI.Modules.COMMON)}
++          onClick={onDownloadTo}
++        />
++      )}
++      {children}
 +      <Button
 +        className="tiny basic"
 +        icon={IconConstants.CLEAR}
@@ -537,10 +1543,10 @@ index 0000000..7c57785
 +});
 diff --git a/src/components/table/selection/__tests__/TableSelection.node.test.tsx b/src/components/table/selection/__tests__/TableSelection.node.test.tsx
 new file mode 100644
-index 0000000..fa1917b
+index 0000000..8bbfd0a
 --- /dev/null
 +++ b/src/components/table/selection/__tests__/TableSelection.node.test.tsx
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,139 @@
 +import * as React from 'react';
 +import { afterEach, describe, expect, it, vi } from 'vitest';
 +import { act, cleanup, render, screen } from '@testing-library/react';
@@ -629,9 +1635,10 @@ index 0000000..fa1917b
 +  it('shows the actions for selected items', async () => {
 +    const store = new TableSelectionStore<Item>();
 +    const onDownload = vi.fn();
++    const onDownloadTo = vi.fn();
 +    const { container } = render(
 +      <TableSelectionProvider store={store}>
-+        <SelectionBar onDownload={onDownload} />
++        <SelectionBar onDownload={onDownload} onDownloadTo={onDownloadTo} />
 +      </TableSelectionProvider>,
 +    );
 +
@@ -642,14 +1649,41 @@ index 0000000..fa1917b
 +
 +    expect(container.querySelector('.table-selection-bar')).not.toBeNull();
 +    const buttons = screen.getAllByRole('button');
-+    expect(buttons).toHaveLength(2);
++    expect(buttons).toHaveLength(3);
++    expect(buttons.map((button) => button.textContent)).toEqual([
++      'Download',
++      'Download to...',
++      'Clear selection',
++    ]);
 +
 +    await userEvent.click(buttons[0]);
 +    expect(onDownload).toHaveBeenCalledTimes(1);
++    expect(onDownloadTo).not.toHaveBeenCalled();
 +
 +    await userEvent.click(buttons[1]);
++    expect(onDownloadTo).toHaveBeenCalledTimes(1);
++
++    await userEvent.click(buttons[2]);
 +    expect(store.getItems()).toEqual([]);
 +    expect(container.querySelector('.table-selection-bar')).toBeNull();
++  });
++
++  it('renders additional actions and omits the download button when not requested', () => {
++    const store = new TableSelectionStore<Item>();
++    store.setSelected(itemA, true);
++
++    render(
++      <TableSelectionProvider store={store}>
++        <SelectionBar>
++          <button type="button">Extra action</button>
++        </SelectionBar>
++      </TableSelectionProvider>,
++    );
++
++    // Extra action + clear selection (no download button)
++    const buttons = screen.getAllByRole('button');
++    expect(buttons).toHaveLength(2);
++    expect(buttons[0].textContent).toBe('Extra action');
 +  });
 +});
 diff --git a/src/components/table/selection/__tests__/TableSelectionStore.node.test.ts b/src/components/table/selection/__tests__/TableSelectionStore.node.test.ts
@@ -742,23 +1776,68 @@ index 0000000..b284dc7
 +    expect(store.getGeneration()).toBe(initial + 2);
 +  });
 +});
+diff --git a/src/components/table/selection/__tests__/useTableSelection.node.test.tsx b/src/components/table/selection/__tests__/useTableSelection.node.test.tsx
+new file mode 100644
+index 0000000..9c31e6a
+--- /dev/null
++++ b/src/components/table/selection/__tests__/useTableSelection.node.test.tsx
+@@ -0,0 +1,38 @@
++import { describe, expect, it } from 'vitest';
++import { act, renderHook } from '@testing-library/react';
++
++import { useTableSelection } from '../useTableSelection';
++
++interface Item {
++  id: number;
++}
++
++describe('useTableSelection', () => {
++  it('keeps the same store and selection while the reset key is unchanged', () => {
++    const { result, rerender } = renderHook(
++      ({ resetKey }) => useTableSelection<Item>(resetKey),
++      { initialProps: { resetKey: 'a' } },
++    );
++
++    const store = result.current;
++    act(() => store.setSelected({ id: 1 }, true));
++
++    rerender({ resetKey: 'a' });
++    expect(result.current).toBe(store);
++    expect(store.getItems()).toEqual([{ id: 1 }]);
++  });
++
++  it('clears the selection when the reset key changes', () => {
++    const { result, rerender } = renderHook(
++      ({ resetKey }) => useTableSelection<Item>(resetKey),
++      { initialProps: { resetKey: 'a' } },
++    );
++
++    const store = result.current;
++    act(() => store.setSelected({ id: 1 }, true));
++
++    rerender({ resetKey: 'b' });
++    expect(result.current).toBe(store);
++    expect(store.getItems()).toEqual([]);
++  });
++});
 diff --git a/src/components/table/selection/index.ts b/src/components/table/selection/index.ts
 new file mode 100644
-index 0000000..3502d6c
+index 0000000..b565a60
 --- /dev/null
 +++ b/src/components/table/selection/index.ts
-@@ -0,0 +1,5 @@
+@@ -0,0 +1,6 @@
 +export * from './TableSelectionStore';
 +export * from './TableSelectionContext';
 +export * from './SelectCell';
 +export * from './SelectionBar';
 +export * from './SelectAllHeaderCell';
++export * from './useTableSelection';
 diff --git a/src/components/table/selection/style.css b/src/components/table/selection/style.css
 new file mode 100644
-index 0000000..9dc04b3
+index 0000000..8816898
 --- /dev/null
 +++ b/src/components/table/selection/style.css
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,39 @@
 +.virtual-table .cell-wrapper .table-select-checkbox {
 +  display: block;
 +  width: 18px;
@@ -793,32 +1872,944 @@ index 0000000..9dc04b3
 +  margin: 0px 0px 0px 3px;
 +  cursor: pointer;
 +}
++
++/* Space between the other footer content and the selection bar */
++.table-footer > * + .table-selection-bar {
++  margin-left: 12px;
++}
+diff --git a/src/components/table/selection/useTableSelection.ts b/src/components/table/selection/useTableSelection.ts
+new file mode 100644
+index 0000000..ca46714
+--- /dev/null
++++ b/src/components/table/selection/useTableSelection.ts
+@@ -0,0 +1,17 @@
++import * as React from 'react';
++
++import { TableSelectionItem, TableSelectionStore } from './TableSelectionStore';
++
++// Creates a selection store for a table. The selection is cleared when the reset key
++// changes (e.g. the displayed directory or the search was changed).
++export const useTableSelection = <ItemT extends TableSelectionItem>(
++  resetKey: string | number,
++) => {
++  const store = React.useMemo(() => new TableSelectionStore<ItemT>(), []);
++
++  React.useEffect(() => {
++    store.clear();
++  }, [store, resetKey]);
++
++  return store;
++};
+diff --git a/src/routes/Queue/__tests__/QueueSelection.browser.test.tsx b/src/routes/Queue/__tests__/QueueSelection.browser.test.tsx
+new file mode 100644
+index 0000000..8bbe09b
+--- /dev/null
++++ b/src/routes/Queue/__tests__/QueueSelection.browser.test.tsx
+@@ -0,0 +1,260 @@
++import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
++import { waitFor, within } from '@testing-library/react';
++
++import { renderDataRoutes } from '@/tests/render/test-renderers';
++import { initCommonDataMocks } from '@/tests/mocks/mock-data-common';
++import { getMockServer, MockServer } from '@/tests/mocks/mock-server';
++import { installTableMocks } from '@/tests/mocks/mock-table';
++import { setupUserEvent } from '@/tests/helpers/test-form-helpers';
++import { clickMenuItem, openMenu } from '@/tests/helpers/test-menu-helpers';
++import { navigateToUrl, parseMockRequest } from '@/tests/helpers/test-helpers';
++
++import QueueConstants from '@/constants/QueueConstants';
++import Queue from '../components/Queue';
++import { QueueBundlesListResponse } from '@/tests/mocks/api/queue-bundles';
++import { QueueFilesListResponse } from '@/tests/mocks/api/queue-files';
++
++const [Bundle1, Bundle2] = QueueBundlesListResponse;
++
++describe('Queue selection', () => {
++  let server: MockServer;
++
++  beforeEach(() => {
++    server = getMockServer();
++  });
++
++  afterEach(() => {
++    server.stop();
++  });
++
++  const renderLayout = async () => {
++    const commonData = await initCommonDataMocks(server);
++
++    const bundleTableMocks = installTableMocks(QueueBundlesListResponse, {
++      server,
++      moduleUrl: QueueConstants.MODULE_URL,
++      viewName: QueueConstants.BUNDLE_VIEW_ID,
++    });
++
++    // Select all fetches all rows of the view at once (the default mocks support only up to 10 rows)
++    server.addRequestHandler(
++      'GET',
++      `queue/${QueueConstants.BUNDLE_VIEW_ID}_view/items/0/${QueueBundlesListResponse.length}`,
++      bundleTableMocks.mockTableManager.getItems(0, QueueBundlesListResponse.length),
++    );
++
++    installTableMocks(QueueFilesListResponse, {
++      server,
++      moduleUrl: QueueConstants.MODULE_URL,
++      viewName: QueueConstants.FILE_VIEW_ID,
++    });
++
++    const onRemove = vi.fn();
++    const onPriority = vi.fn();
++    QueueBundlesListResponse.forEach((bundle) => {
++      server.addRequestHandler(
++        'POST',
++        `queue/bundles/${bundle.id}/remove`,
++        undefined,
++        onRemove,
++      );
++      server.addRequestHandler(
++        'POST',
++        `queue/bundles/${bundle.id}/priority`,
++        undefined,
++        onPriority,
++      );
++    });
++
++    const routes = [
++      {
++        index: true,
++        Component: () => <div>Index page</div>,
++      },
++      {
++        path: '/queue/*',
++        Component: () => <Queue />,
++      },
++    ];
++
++    const renderData = renderDataRoutes(routes, commonData, {
++      routerProps: { initialEntries: ['/queue'] },
++    });
++
++    const userEvent = setupUserEvent();
++    const renderResult = { ...commonData, ...renderData, userEvent };
++
++    await waitFor(() => expect(renderResult.getByRole('grid')).toBeTruthy());
++    await waitFor(() => expect(renderResult.queryByText(Bundle1.name)).toBeTruthy());
++
++    return { ...renderResult, bundleTableMocks, onRemove, onPriority };
++  };
++
++  const requestsOf = (mock: ReturnType<typeof vi.fn>) =>
++    mock.mock.calls.map(([request]) => parseMockRequest(request));
++
++  test('should select and deselect a bundle', async () => {
++    const { getByRole, getByText, queryByText, userEvent, router } = await renderLayout();
++
++    // Nothing selected
++    expect(queryByText(/selected$/)).toBeNull();
++
++    const checkbox = getByRole('checkbox', { name: `Select ${Bundle1.name}` });
++    await userEvent.click(checkbox);
++
++    await waitFor(() => expect(getByText('1 selected')).toBeTruthy());
++    expect((checkbox as HTMLInputElement).checked).toBe(true);
++
++    await userEvent.click(checkbox);
++    await waitFor(() => expect(queryByText('1 selected')).toBeNull());
++
++    await navigateToUrl('/', router);
++  });
++
++  test('should select and clear all bundles with the header checkbox', async () => {
++    const { getByRole, getByText, queryByText, userEvent, router } = await renderLayout();
++
++    const total = QueueBundlesListResponse.length;
++    const selectAll = getByRole('checkbox', { name: 'Select all' }) as HTMLInputElement;
++    await userEvent.click(selectAll);
++
++    await waitFor(() => expect(getByText(`${total} selected`)).toBeTruthy());
++    expect(selectAll.checked).toBe(true);
++
++    // Everything is selected, the next click clears the selection
++    await userEvent.click(selectAll);
++    await waitFor(() => expect(queryByText(`${total} selected`)).toBeNull());
++    expect(selectAll.checked).toBe(false);
++
++    await navigateToUrl('/', router);
++  });
++
++  test('should show the partial selection state', async () => {
++    const { getByRole, userEvent, router } = await renderLayout();
++
++    await userEvent.click(getByRole('checkbox', { name: `Select ${Bundle1.name}` }));
++
++    const selectAll = getByRole('checkbox', { name: 'Select all' }) as HTMLInputElement;
++    await waitFor(() => expect(selectAll.indeterminate).toBe(true));
++    expect(selectAll.checked).toBe(false);
++
++    await navigateToUrl('/', router);
++  });
++
++  test('should not show the selected bundle actions without a selection', async () => {
++    const renderResult = await renderLayout();
++    const { findByRole, queryByRole, router } = renderResult;
++
++    await openMenu('Actions...', renderResult);
++    expect(await findByRole('menuitem', { name: 'Pause all bundles' })).toBeTruthy();
++    expect(queryByRole('menuitem', { name: 'Remove selected bundles' })).toBeNull();
++
++    await navigateToUrl('/', router);
++  });
++
++  test('should show the selected bundle actions in the actions menu', async () => {
++    const renderResult = await renderLayout();
++    const { findByRole, getByRole, userEvent, router } = renderResult;
++
++    await userEvent.click(getByRole('checkbox', { name: `Select ${Bundle1.name}` }));
++    await openMenu('Actions...', renderResult);
++
++    // Both the general and the selection actions are in the same menu
++    expect(await findByRole('menuitem', { name: 'Pause all bundles' })).toBeTruthy();
++    expect(
++      await findByRole('menuitem', { name: 'Remove selected bundles' }),
++    ).toBeTruthy();
++
++    await navigateToUrl('/', router);
++  });
++
++  test('should remove the selected bundles', async () => {
++    const renderResult = await renderLayout();
++    const { getByRole, queryByText, userEvent, onRemove, router } = renderResult;
++
++    await userEvent.click(getByRole('checkbox', { name: `Select ${Bundle1.name}` }));
++    await userEvent.click(getByRole('checkbox', { name: `Select ${Bundle2.name}` }));
++
++    await openMenu('Actions...', renderResult);
++    await clickMenuItem('Remove selected bundles', renderResult);
++
++    // Confirmation
++    const dialog = await waitFor(() => {
++      const element = getByRole('dialog');
++      expect(element).toBeVisible();
++      return element;
++    });
++
++    expect(
++      within(dialog).getByText('Are you sure that you want to remove 2 bundles?'),
++    ).toBeTruthy();
++
++    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove bundles' }));
++
++    await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(2));
++    expect(requestsOf(onRemove)).toEqual([
++      {
++        method: 'POST',
++        path: `queue/bundles/${Bundle1.id}/remove`,
++        data: { remove_finished: false },
++      },
++      {
++        method: 'POST',
++        path: `queue/bundles/${Bundle2.id}/remove`,
++        data: { remove_finished: false },
++      },
++    ]);
++
++    // The handled bundles are removed from the selection
++    await waitFor(() => expect(queryByText('2 selected')).toBeNull());
++
++    await navigateToUrl('/', router);
++  });
++
++  test('should not remove anything when the confirmation is rejected', async () => {
++    const renderResult = await renderLayout();
++    const { getByRole, userEvent, onRemove, router } = renderResult;
++
++    await userEvent.click(getByRole('checkbox', { name: `Select ${Bundle1.name}` }));
++
++    await openMenu('Actions...', renderResult);
++    await clickMenuItem('Remove selected bundles', renderResult);
++
++    const dialog = await waitFor(() => {
++      const element = getByRole('dialog');
++      expect(element).toBeVisible();
++      return element;
++    });
++
++    await userEvent.click(within(dialog).getByRole('button', { name: `Don't remove` }));
++    await waitFor(() => expect(renderResult.queryByRole('dialog')).toBeNull());
++
++    expect(onRemove).not.toHaveBeenCalled();
++    expect(renderResult.getByText('1 selected')).toBeTruthy();
++
++    await navigateToUrl('/', router);
++  });
++
++  test('should set the priority of the selected bundles', async () => {
++    const renderResult = await renderLayout();
++    const { getByRole, userEvent, onPriority, router } = renderResult;
++
++    await userEvent.click(getByRole('checkbox', { name: `Select ${Bundle1.name}` }));
++    await userEvent.click(getByRole('checkbox', { name: `Select ${Bundle2.name}` }));
++
++    await openMenu('Actions...', renderResult);
++    await userEvent.click(await renderResult.findByText('Set priority of selected'));
++    await clickMenuItem('Highest', renderResult);
++
++    await waitFor(() => expect(onPriority).toHaveBeenCalledTimes(2));
++    expect(requestsOf(onPriority).map((request) => request.path)).toEqual([
++      `queue/bundles/${Bundle1.id}/priority`,
++      `queue/bundles/${Bundle2.id}/priority`,
++    ]);
++    requestsOf(onPriority).forEach((request) =>
++      expect(request.data).toEqual({ priority: 6 }),
++    );
++
++    await navigateToUrl('/', router);
++  });
++});
+diff --git a/src/routes/Queue/components/Queue.tsx b/src/routes/Queue/components/Queue.tsx
+index 12306f6..4070193 100644
+--- a/src/routes/Queue/components/Queue.tsx
++++ b/src/routes/Queue/components/Queue.tsx
+@@ -2,6 +2,14 @@ import * as React from 'react';
+ import { Column } from 'fixed-data-table-2';
+ 
+ import VirtualTable from '@/components/table/VirtualTable';
++import {
++  SelectAllHeaderCell,
++  SelectCell,
++  SelectionBar,
++  TableSelectionProvider,
++  useTableSelection,
++} from '@/components/table/selection';
++import { QueueActionsMenu } from '@/routes/Queue/components/QueueActionsMenu';
+ 
+ import PriorityMenu from '@/routes/Queue/components/PriorityMenu';
+ import StatusCell from '@/routes/Queue/components/StatusCell';
+@@ -10,7 +18,6 @@ import QueueBundleViewStore from '@/stores/views/QueueBundleViewStore';
+ import BundleFileDialog from '@/routes/Queue/components/file-dialog/BundleFileDialog';
+ import SourceDialog from '@/routes/Queue/components/source-dialog/BundleSourceDialog';
+ 
+-import { ActionMenu } from '@/components/action-menu';
+ import Message from '@/components/semantic/Message';
+ 
+ import {
+@@ -34,7 +41,6 @@ import { setBundlePriority } from '@/services/api/QueueApi';
+ import IconConstants from '@/constants/IconConstants';
+ import MenuConstants from '@/constants/MenuConstants';
+ import {
+-  QueueActionMenu,
+   QueueBundleActionMenu,
+   QueueBundleActionModule,
+   QueueBundleViewContentAction,
+@@ -67,8 +73,8 @@ const rowClassNameGetter = (rowData: API.QueueBundle) => {
+   return 'pending';
+ };
+ 
+-class Queue extends React.Component<WithTranslation> {
+-  static readonly displayName = 'Queue';
++class QueueView extends React.Component<WithTranslation> {
++  static readonly displayName = 'QueueView';
+ 
+   isActive = (cellData: any, rowData: API.QueueBundle) => {
+     return !rowData.status.downloaded;
+@@ -98,26 +104,28 @@ class Queue extends React.Component<WithTranslation> {
+ 
+   queueT = getModuleT(this.props.t, UI.Modules.QUEUE);
+   render() {
+-    const { translate } = this.queueT;
+     return (
+       <>
+         <VirtualTable
+           emptyRowsNodeGetter={this.emptyRowsNodeGetter}
+           store={QueueBundleViewStore}
+           footerData={
+-            <ActionMenu
+-              className="top left pointing"
+-              caption={translate('Actions...')}
+-              actions={QueueActionMenu}
+-              header={translate('Queue actions')}
+-              triggerIcon="chevron up"
+-              button={true}
+-              remoteMenuId={MenuConstants.QUEUE}
+-            />
++            <>
++              <QueueActionsMenu queueT={this.queueT} />
++              <SelectionBar />
++            </>
+           }
+           rowClassNameGetter={rowClassNameGetter}
+           moduleId={UI.Modules.QUEUE}
+         >
++          <Column
++            name="Select"
++            width={40}
++            columnKey="select"
++            header={<SelectAllHeaderCell viewStore={QueueBundleViewStore} />}
++            cell={<SelectCell />}
++            flexGrow={0}
++          />
+           <Column
+             name="Name"
+             width={200}
+@@ -227,4 +235,16 @@ class Queue extends React.Component<WithTranslation> {
+   }
+ }
+ 
+-export default withTranslation()(Queue);
++const QueueViewTranslated = withTranslation()(QueueView);
++
++// Selection is shared by the table cells (checkboxes) and the footer (bulk actions)
++const Queue: React.FC = () => {
++  const selection = useTableSelection<API.QueueBundle>('queue');
++  return (
++    <TableSelectionProvider store={selection}>
++      <QueueViewTranslated />
++    </TableSelectionProvider>
++  );
++};
++
++export default Queue;
+diff --git a/src/routes/Queue/components/QueueActionsMenu.tsx b/src/routes/Queue/components/QueueActionsMenu.tsx
+new file mode 100644
+index 0000000..09a1c0e
+--- /dev/null
++++ b/src/routes/Queue/components/QueueActionsMenu.tsx
+@@ -0,0 +1,63 @@
++import * as React from 'react';
++import { useTranslation } from 'react-i18next';
++
++import { ActionMenu } from '@/components/action-menu';
++import { useSelectedItems, useTableSelectionStore } from '@/components/table/selection';
++
++import {
++  QueueActionMenu,
++  QueueBundleSelectionActionMenu,
++  QueueBundleSelectionData,
++} from '@/actions/ui/queue';
++
++import MenuConstants from '@/constants/MenuConstants';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { toI18nKey } from '@/utils/TranslationUtils';
++
++interface QueueActionsMenuProps {
++  queueT: UI.ModuleTranslator;
++}
++
++// The queue actions menu in the table footer. The actions for the selected bundles
++// are added to the same menu while there are selected bundles.
++export const QueueActionsMenu: React.FC<QueueActionsMenuProps> = ({ queueT }) => {
++  const { t } = useTranslation();
++  const selection = useTableSelectionStore<API.QueueBundle>();
++  const bundles = useSelectedItems<API.QueueBundle>();
++
++  const selectionItemData: QueueBundleSelectionData = React.useMemo(
++    () => ({
++      id: 'selection',
++      name: t(toI18nKey('xBundles', UI.Modules.QUEUE), {
++        defaultValue_one: '{{count}} bundle',
++        defaultValue_other: '{{count}} bundles',
++        count: bundles.length,
++        replace: { count: bundles.length },
++      }),
++      bundles,
++      selection,
++    }),
++    [bundles, selection, t],
++  );
++
++  return (
++    <ActionMenu
++      className="top left pointing"
++      caption={queueT.translate('Actions...')}
++      actions={QueueActionMenu}
++      header={queueT.translate('Queue actions')}
++      triggerIcon="chevron up"
++      button={true}
++      remoteMenuId={MenuConstants.QUEUE}
++    >
++      {bundles.length > 0 && (
++        <ActionMenu
++          actions={QueueBundleSelectionActionMenu}
++          itemData={selectionItemData}
++        />
++      )}
++    </ActionMenu>
++  );
++};
+diff --git a/src/routes/Search/__tests__/Search.browser.test.tsx b/src/routes/Search/__tests__/Search.browser.test.tsx
+index 5b9cf4c..aa2f56c 100644
+--- a/src/routes/Search/__tests__/Search.browser.test.tsx
++++ b/src/routes/Search/__tests__/Search.browser.test.tsx
+@@ -12,6 +12,7 @@ import {
+   clickButton,
+   clickIconButton,
+   navigateToUrl,
++  parseMockRequest,
+   waitExpectRequestToMatchSnapshot,
+   waitForLoader,
+   waitForUrl,
+@@ -279,6 +280,81 @@ describe('Search layout', () => {
+     await navigateToUrl('/', router);
+   });
+ 
++  test('should download the selected results to the default directory', async () => {
++    const renderData = await renderLayout();
++    const {
++      getByRole,
++      getByText,
++      queryByText,
++      sessionStore,
++      router,
++      resultTableMocks,
++      userEvent,
++    } = renderData;
++
++    const result = GroupedSearchResultDirectoryResponse;
++    const onDownload = vi.fn();
++    server.addRequestHandler(
++      'POST',
++      `${SearchConstants.INSTANCES_URL}/${SearchInstanceNewResponse.id}/results/${result.id}/download`,
++      undefined,
++      onDownload,
++    );
++
++    sessionStore.getState().hubs.init([HubADC1]);
++    resultTableMocks.mockTableManager.setItems(GroupedSearchResultsListResponse);
++
++    await waitFor(() => expect(getByRole('grid')).toBeTruthy());
++    await waitFor(() => expect(queryByText(result.name)).toBeTruthy());
++
++    // Nothing selected
++    expect(queryByText(/selected$/)).toBeNull();
++
++    await userEvent.click(getByRole('checkbox', { name: `Select ${result.name}` }));
++    await waitFor(() => expect(getByText('1 selected')).toBeTruthy());
++
++    // Queued right away, the dialog isn't opened
++    await openMenu('Actions...', renderData);
++    await clickMenuItem('Download selected', renderData);
++    await waitFor(() => expect(onDownload).toHaveBeenCalledTimes(1));
++
++    const request = parseMockRequest(onDownload.mock.calls[0][0]);
++    expect(request.data.target_name).toBe(result.name);
++    expect(request.data).not.toHaveProperty('target_directory');
++    expect(router.state.location.pathname).toBe('/search');
++
++    // The item was queued so it's no longer selected
++    await waitFor(() => expect(queryByText('1 selected')).toBeNull());
++
++    await navigateToUrl('/', router);
++  });
++
++  test('should open the download dialog for the selected results', async () => {
++    const renderData = await renderLayout();
++    const { getByRole, getByText, queryByText, sessionStore, router, resultTableMocks } =
++      renderData;
++    const { userEvent } = renderData;
++
++    sessionStore.getState().hubs.init([HubADC1]);
++    resultTableMocks.mockTableManager.setItems(GroupedSearchResultsListResponse);
++
++    await waitFor(() => expect(getByRole('grid')).toBeTruthy());
++
++    const result = GroupedSearchResultDirectoryResponse;
++    await waitFor(() => expect(queryByText(result.name)).toBeTruthy());
++
++    await userEvent.click(getByRole('checkbox', { name: `Select ${result.name}` }));
++    await waitFor(() => expect(getByText('1 selected')).toBeTruthy());
++
++    await openMenu('Actions...', renderData);
++    await clickMenuItem('Download selected to...', renderData);
++    await waitFor(() =>
++      expect(router.state.location.pathname).toMatch(/download\/bulk$/),
++    );
++
++    await navigateToUrl('/', router);
++  });
++
+   test('should handle custom search options', async () => {
+     const renderData = await renderLayout();
+     const {
+diff --git a/src/routes/Search/components/ResultTable.tsx b/src/routes/Search/components/ResultTable.tsx
+index 7a4c587..4a3c8a6 100644
+--- a/src/routes/Search/components/ResultTable.tsx
++++ b/src/routes/Search/components/ResultTable.tsx
+@@ -6,6 +6,14 @@ import SearchViewStore from '@/stores/views/SearchViewStore';
+ 
+ import { Column } from 'fixed-data-table-2';
+ import VirtualTable from '@/components/table/VirtualTable';
++import {
++  SelectAllHeaderCell,
++  SelectCell,
++  SelectionBar,
++  TableSelectionProvider,
++  useTableSelection,
++} from '@/components/table/selection';
++import { useBulkDownload } from '@/components/download/bulk/useBulkDownload';
+ import {
+   SizeCell,
+   DurationCell,
+@@ -13,7 +21,7 @@ import {
+   FileDownloadCell,
+   DecimalCell,
+ } from '@/components/table/Cell';
+-import { ActionMenu, TableActionMenu, TableUserMenu } from '@/components/action-menu';
++import { TableActionMenu, TableUserMenu } from '@/components/action-menu';
+ 
+ import { dupeToStringType } from '@/utils/TypeConvert';
+ import { UserFileActions } from '@/actions/ui/user/UserActions';
+@@ -31,7 +39,8 @@ import { searchDownloadHandler } from '@/services/api/SearchApi';
+ import IconConstants from '@/constants/IconConstants';
+ import MenuConstants from '@/constants/MenuConstants';
+ import SearchConstants from '@/constants/SearchConstants';
+-import { GroupedSearchResultActionMenu, SearchActionMenu } from '@/actions/ui/search';
++import { GroupedSearchResultActionMenu } from '@/actions/ui/search';
++import { SearchActionsMenu } from './SearchActionsMenu';
+ 
+ export const getGroupedResultUserCaption = (
+   { count, user }: API.SearchResultUserInfo,
+@@ -79,8 +88,10 @@ const resultUserGetter = (rowData: API.GroupedSearchResult) => {
+   return rowData.users.user;
+ };
+ 
+-interface NameCellProps
+-  extends RowWrapperCellChildProps<string, API.GroupedSearchResult> {
++interface NameCellProps extends RowWrapperCellChildProps<
++  string,
++  API.GroupedSearchResult
++> {
+   instance: API.SearchInstance;
+ }
+ 
+@@ -108,8 +119,16 @@ export interface ResultTableProps {
+   instance: API.SearchInstance;
+ }
+ 
+-class ResultTable extends React.Component<ResultTableProps> {
+-  static readonly displayName = 'ResultTable';
++interface ResultTableViewProps extends ResultTableProps {
++  // Provided by the wrapper (supports downloading the selected results)
++  downloadHandler: UI.DownloadHandler<API.GroupedSearchResult>;
++  itemDataGetter: UI.DownloadItemDataGetter<API.GroupedSearchResult>;
++  onDownload: () => Promise<unknown>;
++  onDownloadTo: () => void;
++}
++
++class ResultTableView extends React.Component<ResultTableViewProps> {
++  static readonly displayName = 'ResultTableView';
+ 
+   rowClassNameGetter = (rowData: API.GroupedSearchResult) => {
+     return dupeToStringType(rowData.dupe);
+@@ -163,19 +182,15 @@ class ResultTable extends React.Component<ResultTableProps> {
+     );
+   };
+ 
+-  itemDataGetter: UI.DownloadItemDataGetter<API.GroupedSearchResult> = (
+-    itemId,
+-    socket,
+-  ) => {
+-    const { instance } = this.props;
+-    return socket.get(
+-      `${SearchConstants.INSTANCES_URL}/${instance.id}/results/${itemId}`,
+-    );
+-  };
+-
+   render() {
+-    const { searchT, instance } = this.props;
+-    const { translate } = searchT;
++    const {
++      searchT,
++      instance,
++      downloadHandler,
++      itemDataGetter,
++      onDownload,
++      onDownloadTo,
++    } = this.props;
+     return (
+       <>
+         <VirtualTable
+@@ -188,18 +203,25 @@ class ResultTable extends React.Component<ResultTableProps> {
+           entityId={instance.id}
+           moduleId={UI.Modules.SEARCH}
+           footerData={
+-            <ActionMenu
+-              className="top left pointing"
+-              caption={translate('Actions...')}
+-              actions={SearchActionMenu}
+-              header={translate('Search actions')}
+-              triggerIcon="chevron up"
+-              button={true}
+-              itemData={instance}
+-              remoteMenuId={MenuConstants.SEARCH_INSTANCE}
+-            />
++            <>
++              <SearchActionsMenu
++                searchT={searchT}
++                instance={instance}
++                onDownload={onDownload}
++                onDownloadTo={onDownloadTo}
++              />
++              <SelectionBar />
++            </>
+           }
+         >
++          <Column
++            name="Select"
++            width={40}
++            columnKey="select"
++            header={<SelectAllHeaderCell viewStore={SearchViewStore} />}
++            cell={<SelectCell />}
++            flexGrow={0}
++          />
+           <Column
+             name="Name"
+             width={200}
+@@ -255,8 +277,8 @@ class ResultTable extends React.Component<ResultTableProps> {
+           />
+         </VirtualTable>
+         <DownloadDialog
+-          downloadHandler={searchDownloadHandler}
+-          itemDataGetter={this.itemDataGetter}
++          downloadHandler={downloadHandler}
++          itemDataGetter={itemDataGetter}
+           sessionItem={instance}
+         />
+         <ResultDialog searchT={searchT} instance={instance} />
+@@ -265,4 +287,39 @@ class ResultTable extends React.Component<ResultTableProps> {
+   }
+ }
+ 
++const getResultItemDataGetter = (
++  instance: API.SearchInstance,
++): UI.DownloadItemDataGetter<API.GroupedSearchResult> => {
++  return (itemId, socket) =>
++    socket.get(`${SearchConstants.INSTANCES_URL}/${instance.id}/results/${itemId}`);
++};
++
++// Selection is shared by the table cells (checkboxes) and the footer (bulk download).
++// The results are replaced when a new search is started, so the selection is cleared then.
++const ResultTable: React.FC<ResultTableProps> = (props) => {
++  const { instance, searchString } = props;
++  const selection = useTableSelection<API.GroupedSearchResult>(
++    `${instance.id}:${instance.current_search_id}:${searchString}`,
++  );
++
++  const bulkDownload = useBulkDownload({
++    selection,
++    downloadHandler: searchDownloadHandler,
++    itemDataGetter: getResultItemDataGetter(instance),
++    entity: instance,
++  });
++
++  return (
++    <TableSelectionProvider store={selection}>
++      <ResultTableView
++        {...props}
++        downloadHandler={bulkDownload.downloadHandler}
++        itemDataGetter={bulkDownload.itemDataGetter}
++        onDownload={bulkDownload.startDownload}
++        onDownloadTo={bulkDownload.startDownloadTo}
++      />
++    </TableSelectionProvider>
++  );
++};
++
+ export default ResultTable;
+diff --git a/src/routes/Search/components/SearchActionsMenu.tsx b/src/routes/Search/components/SearchActionsMenu.tsx
+new file mode 100644
+index 0000000..f082187
+--- /dev/null
++++ b/src/routes/Search/components/SearchActionsMenu.tsx
+@@ -0,0 +1,65 @@
++import * as React from 'react';
++import { useTranslation } from 'react-i18next';
++
++import { ActionMenu } from '@/components/action-menu';
++import { useSelectedItems } from '@/components/table/selection';
++
++import {
++  SearchActionMenu,
++  SearchSelectionActionMenu,
++  SearchSelectionData,
++} from '@/actions/ui/search';
++
++import MenuConstants from '@/constants/MenuConstants';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { toI18nKey } from '@/utils/TranslationUtils';
++
++interface SearchActionsMenuProps {
++  searchT: UI.ModuleTranslator;
++  instance: API.SearchInstance;
++  onDownload: () => Promise<unknown>;
++  onDownloadTo: () => void;
++}
++
++// The search actions menu in the table footer. The actions for the selected results
++// are added to the same menu while there are selected results.
++export const SearchActionsMenu: React.FC<SearchActionsMenuProps> = ({
++  searchT,
++  instance,
++  onDownload,
++  onDownloadTo,
++}) => {
++  const { t } = useTranslation();
++  const results = useSelectedItems<API.GroupedSearchResult>();
++
++  const selectionItemData: SearchSelectionData = {
++    id: 'selection',
++    name: t(toI18nKey('xResults', UI.Modules.SEARCH), {
++      defaultValue_one: '{{count}} result',
++      defaultValue_other: '{{count}} results',
++      count: results.length,
++      replace: { count: results.length },
++    }),
++    download: onDownload,
++    downloadTo: onDownloadTo,
++  };
++
++  return (
++    <ActionMenu
++      className="top left pointing"
++      caption={searchT.translate('Actions...')}
++      actions={SearchActionMenu}
++      header={searchT.translate('Search actions')}
++      triggerIcon="chevron up"
++      button={true}
++      itemData={instance}
++      remoteMenuId={MenuConstants.SEARCH_INSTANCE}
++    >
++      {results.length > 0 && (
++        <ActionMenu actions={SearchSelectionActionMenu} itemData={selectionItemData} />
++      )}
++    </ActionMenu>
++  );
++};
+diff --git a/src/routes/Sidebar/routes/Filelists/__tests__/Filelists.browser.test.tsx b/src/routes/Sidebar/routes/Filelists/__tests__/Filelists.browser.test.tsx
+index dc37054..05919ef 100644
+--- a/src/routes/Sidebar/routes/Filelists/__tests__/Filelists.browser.test.tsx
++++ b/src/routes/Sidebar/routes/Filelists/__tests__/Filelists.browser.test.tsx
+@@ -42,6 +42,7 @@ import QueueConstants from '@/constants/QueueConstants';
+ import { QueueBundleCreateFileResponse } from '@/tests/mocks/api/queue-bundles';
+ import {
+   navigateToUrl,
++  parseMockRequest,
+   waitExpectRequestToMatchSnapshot,
+   waitForUrl,
+ } from '@/tests/helpers/test-helpers';
+@@ -382,6 +383,69 @@ describe('Filelists', () => {
+       await navigateToUrl('/', router);
+       await filelist1Mocks.table.waitStopped();
+     });
++
++    test('should download the selected items to the default directory', async () => {
++      const onDownloadFile = vi.fn();
++      server.addRequestHandler(
++        'POST',
++        `${QueueConstants.BUNDLES_URL}/file`,
++        QueueBundleCreateFileResponse,
++        onDownloadFile,
++      );
++
++      const renderResult = await renderLayout();
++      const { findByText, getByRole, getByText, queryByText, filelist1Mocks, router } =
++        renderResult;
++
++      filelist1Mocks.table.mockTableManager.setItems(FilelistDirectoryItemsList.items);
++
++      const fileItem = FilelistGetFilelistItemFileResponse;
++      await findByText(fileItem.name);
++
++      await renderResult.userEvent.click(
++        getByRole('checkbox', { name: `Select ${fileItem.name}` }),
++      );
++      await waitFor(() => expect(getByText('1 selected')).toBeTruthy());
++
++      // Queued right away without the dialog
++      await renderResult.userEvent.click(getByRole('button', { name: 'Download' }));
++      await waitFor(() => expect(onDownloadFile).toHaveBeenCalledTimes(1));
++
++      const { data } = parseMockRequest(onDownloadFile.mock.calls[0][0]);
++      expect(data.tth).toBe(fileItem.tth);
++      expect(data.target_name).toBe(fileItem.name);
++      expect(data.user).toBeTruthy();
++      expect(data).not.toHaveProperty('target_directory');
++      expect(router.state.location.pathname).not.toMatch(/download/);
++
++      await waitFor(() => expect(queryByText('1 selected')).toBeNull());
++
++      await navigateToUrl('/', router);
++      await filelist1Mocks.table.waitStopped();
++    });
++
++    test('should open the download dialog for the selected items', async () => {
++      const renderResult = await renderLayout();
++      const { findByText, getByRole, getByText, filelist1Mocks, router } = renderResult;
++
++      filelist1Mocks.table.mockTableManager.setItems(FilelistDirectoryItemsList.items);
++
++      const fileItem = FilelistGetFilelistItemFileResponse;
++      await findByText(fileItem.name);
++
++      await renderResult.userEvent.click(
++        getByRole('checkbox', { name: `Select ${fileItem.name}` }),
++      );
++      await waitFor(() => expect(getByText('1 selected')).toBeTruthy());
++
++      await renderResult.userEvent.click(getByRole('button', { name: 'Download to...' }));
++      await waitFor(() =>
++        expect(router.state.location.pathname).toMatch(/download\/bulk$/),
++      );
++
++      await navigateToUrl('/', router);
++      await filelist1Mocks.table.waitStopped();
++    });
+   });
+ 
+   describe('new session', () => {
 diff --git a/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx b/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
-index cd4deba..10efcae 100644
+index cd4deba..a2463b4 100644
 --- a/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
 +++ b/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
-@@ -29,6 +29,13 @@ import { FilelistItemActionMenu } from '@/actions/ui/filelist';
+@@ -29,6 +29,11 @@ import { FilelistItemActionMenu } from '@/actions/ui/filelist';
  import { useSessionStore } from '@/context/SessionStoreContext';
  import LinkButton from '@/components/semantic/LinkButton';
  import { noMouseFocusProps } from '@/utils/BrowserUtils';
-+import { useNavigate } from 'react-router';
 +import {
 +  SelectAllHeaderCell,
 +  SelectCell,
 +  SelectionBar,
 +} from '@/components/table/selection';
-+import { BULK_DOWNLOAD_ITEM_ID } from '../utils/bulkDownload';
  
  interface NameCellProps extends RowWrapperCellChildProps<string, API.FilelistItem> {
    filelist: API.FilelistSession;
-@@ -130,8 +137,10 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
+@@ -69,6 +74,8 @@ const NameCell: React.FC<NameCellProps> = ({
+ interface ListBrowserProps {
+   filelist: API.FilelistSession;
+   onClickDirectory: (path: string) => void;
++  onDownload: () => void;
++  onDownloadTo: () => void;
+   sessionT: UI.ModuleTranslator;
+ }
+ 
+@@ -76,6 +83,8 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
+   filelist,
+   sessionT,
+   onClickDirectory,
++  onDownload,
++  onDownloadTo,
+   ...other
+ }) => {
+   const rowClassNameGetter = (rowData: API.FilelistItem) => {
+@@ -130,8 +139,8 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
      return cellData;
    };
  
 -  // const { session } = this.props;
    const sessionStore = useSessionStore();
-+  const navigate = useNavigate();
-+  const handleBulkDownload = () => navigate(`download/${BULK_DOWNLOAD_ITEM_ID}`);
 +
    return (
      <>
@@ -827,7 +2818,7 @@ index cd4deba..10efcae 100644
          textFilterProps={{
            autoFocus: true,
          }}
-+        footerData={<SelectionBar onDownload={handleBulkDownload} />}
++        footerData={<SelectionBar onDownload={onDownload} onDownloadTo={onDownloadTo} />}
        >
 +        <Column
 +          name="Select"
@@ -841,68 +2832,35 @@ index cd4deba..10efcae 100644
            name="Name"
            width={200}
 diff --git a/src/routes/Sidebar/routes/Filelists/components/ListBrowser.tsx b/src/routes/Sidebar/routes/Filelists/components/ListBrowser.tsx
-index 0bf5c35..2f70e2e 100644
+index 0bf5c35..8c0c44b 100644
 --- a/src/routes/Sidebar/routes/Filelists/components/ListBrowser.tsx
 +++ b/src/routes/Sidebar/routes/Filelists/components/ListBrowser.tsx
-@@ -17,6 +17,17 @@ import { useSyncFilelistLocation } from '../effects/useSyncFilelistLocation';
+@@ -17,6 +17,8 @@ import { useSyncFilelistLocation } from '../effects/useSyncFilelistLocation';
  import NotificationActions from '@/actions/NotificationActions';
  import { FilelistItemActionMenu } from '@/actions/ui/filelist';
  import { noMouseFocusProps } from '@/utils/BrowserUtils';
-+import { useTranslation } from 'react-i18next';
-+import { toI18nKey } from '@/utils/TranslationUtils';
-+import {
-+  TableSelectionProvider,
-+  TableSelectionStore,
-+} from '@/components/table/selection';
-+import {
-+  createBulkDownloadHandler,
-+  createBulkDownloadItem,
-+  isBulkDownloadRouteId,
-+} from '../utils/bulkDownload';
++import { TableSelectionProvider, useTableSelection } from '@/components/table/selection';
++import { useBulkDownload } from '@/components/download/bulk/useBulkDownload';
  
  interface ListBrowserProps {
    filelist: API.FilelistSession;
-@@ -86,33 +97,70 @@ const ListBrowser: React.FC<ListBrowserProps> = (props) => {
+@@ -86,33 +88,48 @@ const ListBrowser: React.FC<ListBrowserProps> = (props) => {
      return filelist.user;
    };
  
 -  const filelistItemFetcher = FilelistItemGetter(filelist);
-+  const { t } = useTranslation();
-+
 +  // Selection is tied to the currently displayed directory
-+  const selectionStore = React.useMemo(
-+    () => new TableSelectionStore<API.FilelistItem>(),
-+    [],
-+  );
-+  const currentPath = filelist.location?.path;
-+  React.useEffect(() => {
-+    selectionStore.clear();
-+  }, [filelist.id, currentPath, selectionStore]);
-+
-+  const bulkDownloadHandler = React.useMemo(
-+    () => createBulkDownloadHandler(selectionStore, filelistDownloadHandler),
-+    [selectionStore],
++  const selectionStore = useTableSelection<API.FilelistItem>(
++    `${filelist.id}:${filelist.location?.path}`,
 +  );
 +
-+  const filelistItemFetcher: UI.DownloadItemDataGetter<API.FilelistItem> = (
-+    itemId,
-+    socket,
-+  ) => {
-+    if (isBulkDownloadRouteId(itemId)) {
-+      const items = selectionStore.getItems();
-+      return Promise.resolve(
-+        createBulkDownloadItem(
-+          items,
-+          t(toI18nKey('itemCount', UI.Modules.COMMON), {
-+            defaultValue: '{{count}} items',
-+            replace: { count: items.length },
-+          }),
-+        ),
-+      );
-+    }
-+
-+    return FilelistItemGetter(filelist)(itemId, socket);
-+  };
++  const bulkDownload = useBulkDownload({
++    selection: selectionStore,
++    downloadHandler: filelistDownloadHandler,
++    itemDataGetter: FilelistItemGetter(filelist),
++    entity: filelist,
++    user: filelist.user,
++  });
  
    return (
 -    <div className="browser">
@@ -946,10 +2904,12 @@ index 0bf5c35..2f70e2e 100644
 +          filelist={filelist}
 +          sessionT={sessionT}
 +          onClickDirectory={handleClickDirectory}
++          onDownload={bulkDownload.startDownload}
++          onDownloadTo={bulkDownload.startDownloadTo}
 +        />
 +        <DownloadDialog
-+          downloadHandler={bulkDownloadHandler}
-+          itemDataGetter={filelistItemFetcher}
++          downloadHandler={bulkDownload.downloadHandler}
++          itemDataGetter={bulkDownload.itemDataGetter}
 +          userGetter={userGetter}
 +          sessionItem={filelist}
 +        />
@@ -958,223 +2918,3 @@ index 0bf5c35..2f70e2e 100644
    );
  };
  
-diff --git a/src/routes/Sidebar/routes/Filelists/utils/__tests__/bulkDownload.node.test.ts b/src/routes/Sidebar/routes/Filelists/utils/__tests__/bulkDownload.node.test.ts
-new file mode 100644
-index 0000000..d067fa2
---- /dev/null
-+++ b/src/routes/Sidebar/routes/Filelists/utils/__tests__/bulkDownload.node.test.ts
-@@ -0,0 +1,130 @@
-+import { describe, expect, it, vi } from 'vitest';
-+
-+import * as API from '@/types/api';
-+import * as UI from '@/types/ui';
-+import { TableSelectionStore } from '@/components/table/selection';
-+
-+import {
-+  BULK_DOWNLOAD_ITEM_ID,
-+  createBulkDownloadHandler,
-+  createBulkDownloadItem,
-+  isBulkDownloadPlaceholder,
-+  isBulkDownloadRouteId,
-+} from '../bulkDownload';
-+
-+const createItem = (
-+  id: number,
-+  name: string,
-+  type: 'file' | 'directory',
-+  size = 100,
-+): API.FilelistItem => ({
-+  id,
-+  name,
-+  path: `/${name}`,
-+  tth: `tth${id}`,
-+  dupe: null,
-+  time: 0,
-+  size,
-+  complete: true,
-+  type:
-+    type === 'file'
-+      ? { id: 'file', str: 'File', content_type: 'video' as API.FileContentType }
-+      : { id: 'directory', str: 'Directory', files: 0, directories: 0 },
-+});
-+
-+const file1 = createItem(1, 'one.mkv', 'file', 100);
-+const file2 = createItem(2, 'two.mkv', 'file', 200);
-+const dir = createItem(3, 'folder', 'directory', 300);
-+
-+const socket = {} as any;
-+const entity = undefined;
-+const downloadData = {
-+  target_name: 'placeholder',
-+  target_directory: '/downloads/',
-+  priority: API.QueuePriorityEnum.DEFAULT,
-+} as API.DownloadData;
-+
-+const bulkItemData = (items: API.FilelistItem[]) => ({
-+  itemInfo: createBulkDownloadItem(items, `${items.length} items`),
-+  user: undefined,
-+  entity,
-+});
-+
-+describe('bulk download item', () => {
-+  it('detects the reserved route ID', () => {
-+    expect(isBulkDownloadRouteId(BULK_DOWNLOAD_ITEM_ID)).toBe(true);
-+    expect(isBulkDownloadRouteId(1)).toBe(false);
-+    expect(isBulkDownloadRouteId('1')).toBe(false);
-+  });
-+
-+  it('detects the placeholder item but not real items', () => {
-+    expect(isBulkDownloadPlaceholder(createBulkDownloadItem([file1], '1 item'))).toBe(
-+      true,
-+    );
-+    [file1, file2, dir].forEach((item) =>
-+      expect(isBulkDownloadPlaceholder(item)).toBe(false),
-+    );
-+  });
-+
-+  it('summarizes the selected items', () => {
-+    const item = createBulkDownloadItem([file1, file2, dir], '3 items');
-+    expect(item.name).toBe('3 items');
-+    expect(item.size).toBe(600);
-+    expect(item.type).toMatchObject({ id: 'directory', files: 2, directories: 1 });
-+  });
-+});
-+
-+describe('bulk download handler', () => {
-+  it('passes regular items through to the wrapped handler', async () => {
-+    const selection = new TableSelectionStore<API.FilelistItem>();
-+    const inner = vi.fn().mockResolvedValue(undefined);
-+    const handler = createBulkDownloadHandler(selection, inner);
-+
-+    const itemData = { itemInfo: file1, user: undefined, entity };
-+    await handler(itemData, downloadData, socket);
-+
-+    expect(inner).toHaveBeenCalledTimes(1);
-+    expect(inner).toHaveBeenCalledWith(itemData, downloadData, socket);
-+  });
-+
-+  it('queues every selected item with its own name and clears the selection', async () => {
-+    const selection = new TableSelectionStore<API.FilelistItem>();
-+    [file1, file2, dir].forEach((item) => selection.setSelected(item, true));
-+
-+    const inner = vi.fn().mockResolvedValue(undefined);
-+    const handler = createBulkDownloadHandler(selection, inner);
-+
-+    await handler(bulkItemData(selection.getItems()), downloadData, socket);
-+
-+    expect(inner).toHaveBeenCalledTimes(3);
-+    expect(inner.mock.calls.map(([data]) => data.itemInfo)).toEqual([file1, file2, dir]);
-+    expect(inner.mock.calls.map(([, dlData]) => dlData.target_name)).toEqual([
-+      'one.mkv',
-+      'two.mkv',
-+      'folder',
-+    ]);
-+    inner.mock.calls.forEach(([, dlData]) =>
-+      expect(dlData.target_directory).toBe('/downloads/'),
-+    );
-+    expect(selection.getItems()).toEqual([]);
-+  });
-+
-+  it('keeps failed items selected and reports them', async () => {
-+    const selection = new TableSelectionStore<API.FilelistItem>();
-+    [file1, file2, dir].forEach((item) => selection.setSelected(item, true));
-+
-+    const inner: UI.DownloadHandler<API.FilelistItem> = vi.fn(async ({ itemInfo }) => {
-+      if (itemInfo.id === file2.id) {
-+        throw new Error('queue full');
-+      }
-+    });
-+    const handler = createBulkDownloadHandler(selection, inner);
-+
-+    await expect(
-+      handler(bulkItemData(selection.getItems()), downloadData, socket),
-+    ).rejects.toThrow('Failed to queue 1/3 items (two.mkv): queue full');
-+
-+    expect(selection.getItems()).toEqual([file2]);
-+    expect(inner).toHaveBeenCalledTimes(3);
-+  });
-+});
-diff --git a/src/routes/Sidebar/routes/Filelists/utils/bulkDownload.ts b/src/routes/Sidebar/routes/Filelists/utils/bulkDownload.ts
-new file mode 100644
-index 0000000..b7c822b
---- /dev/null
-+++ b/src/routes/Sidebar/routes/Filelists/utils/bulkDownload.ts
-@@ -0,0 +1,78 @@
-+import * as API from '@/types/api';
-+import * as UI from '@/types/ui';
-+
-+import { TableSelectionStore } from '@/components/table/selection';
-+
-+// The existing download dialog is opened with an item ID in the route (download/:id).
-+// For bulk downloads, this reserved ID is used instead of a real item ID.
-+export const BULK_DOWNLOAD_ITEM_ID = 'bulk';
-+
-+export const isBulkDownloadRouteId = (itemId: API.IdType) =>
-+  String(itemId) === BULK_DOWNLOAD_ITEM_ID;
-+
-+// The dialog receives the placeholder item (not the route ID) from the item getter.
-+// Real filelist paths always start with a slash so this can't match a real item.
-+const BULK_PLACEHOLDER_PATH = '<bulk>';
-+
-+export const isBulkDownloadPlaceholder = (item: API.FilelistItem) =>
-+  item.path === BULK_PLACEHOLDER_PATH;
-+
-+// Placeholder item for the download dialog (it's used only for displaying the dialog)
-+export const createBulkDownloadItem = (
-+  items: API.FilelistItem[],
-+  name: string,
-+): API.FilelistItem => ({
-+  id: -1,
-+  name,
-+  path: BULK_PLACEHOLDER_PATH,
-+  tth: '',
-+  dupe: null,
-+  time: 0,
-+  complete: true,
-+  size: items.reduce((total, item) => total + item.size, 0),
-+  type: {
-+    id: 'directory',
-+    str: 'Directory',
-+    files: items.filter((item) => item.type.id === 'file').length,
-+    directories: items.filter((item) => item.type.id === 'directory').length,
-+  },
-+});
-+
-+// Wraps the regular download handler so that the placeholder item queues all selected items
-+// to the chosen target directory. Items that were queued successfully are removed
-+// from the selection, so that a failed download can be retried without duplicates.
-+export const createBulkDownloadHandler = (
-+  selection: TableSelectionStore<API.FilelistItem>,
-+  downloadHandler: UI.DownloadHandler<API.FilelistItem>,
-+): UI.DownloadHandler<API.FilelistItem> => {
-+  return async (itemData, downloadData, socket) => {
-+    if (!isBulkDownloadPlaceholder(itemData.itemInfo)) {
-+      return downloadHandler(itemData, downloadData, socket);
-+    }
-+
-+    const items = selection.getItems();
-+    const failures: { item: API.FilelistItem; error: Error }[] = [];
-+
-+    for (const item of items) {
-+      try {
-+        await downloadHandler(
-+          { ...itemData, itemInfo: item },
-+          // Each item needs its own name (the shared name belongs to the placeholder)
-+          { ...downloadData, target_name: item.name },
-+          socket,
-+        );
-+
-+        selection.setSelected(item, false);
-+      } catch (e) {
-+        failures.push({ item, error: e as Error });
-+      }
-+    }
-+
-+    if (failures.length > 0) {
-+      const names = failures.map(({ item }) => item.name).join(', ');
-+      throw new Error(
-+        `Failed to queue ${failures.length}/${items.length} items (${names}): ${failures[0].error.message}`,
-+      );
-+    }
-+  };
-+};
