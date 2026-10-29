@@ -43,9 +43,15 @@ RUN installDeps=' \
 # Install dependencies
     && export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends ${installDeps} ${runtimeDeps} \
-# Install node.js to enable airdcpp extension support
-    && curl -sL https://deb.nodesource.com/setup_18.x | bash - \
+# Install node.js to enable airdcpp extension support.
+# Pinned to the 18.x line before, which reached end-of-life in April 2025 —
+# no more security backports land on it at all, which is why it was sitting
+# on an old, unpatched build (including a 9.8-severity CVE). 24.x is a
+# currently-maintained line, and its newer bundled npm also carries patched
+# versions of tar/minimatch/http-cache-semantics.
+    && curl -sL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
 # Download and install airdcpp
     && echo "Downloading ${dl_url}..." \
@@ -61,7 +67,7 @@ ENV LC_ALL=en_US.UTF-8
 RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
     && locale-gen && dpkg-reconfigure -f noninteractive locales
 
-# Replace the prebuilt web UI with the patched build (multi-select in filelists).
+# Replace the prebuilt web UI with the patched build (multi-select in filelists, queue and search).
 # Copied over the existing files so that anything else shipped in web-resources is kept.
 COPY --from=webui-build /webui/dist/ /airdcpp-webclient/web-resources/
 
