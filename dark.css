@@ -1,0 +1,828 @@
+/* AirDC++ Web Client — Dark Mode Theme */
+
+/* === BASE === */
+/* The outer page itself was showing a full-height scrollbar on the far
+   right edge of the browser window — separate from any single panel's
+   own scrollbar (chat, file lists, queue, etc. all scroll internally
+   already). As page/content height varies slightly between views, that
+   outer scrollbar toggles on/off, and each toggle shifts the whole
+   layout left-right by the scrollbar's width — the same jump as the
+   #side-menu issue, just one level up. Since every panel that actually
+   needs to scroll already has its own inner overflow, the page root
+   itself never needs to: killing overflow here removes that scrollbar
+   outright rather than just reserving its space. */
+html, body, body#dimmable-page, html body, html body#dimmable-page {
+  overflow: hidden !important;
+}
+html { background-color: #0f1117 !important; color: #d0d4e0 !important; }
+body, body#dimmable-page, html body, html body#dimmable-page {
+  background: #0f1117 !important; background-color: #0f1117 !important; color: #d0d4e0 !important;
+}
+
+/* === TEXT SELECTION === */
+::selection { background-color: #264f78 !important; color: #ffffff !important; }
+::-moz-selection { background-color: #264f78 !important; color: #ffffff !important; }
+
+/* === NAVIGATION === */
+.ui.menu, .ui.menu.fixed, .ui.inverted.menu, .ui.secondary.menu,
+.ui.top.menu, .ui.menu:not(.vertical), header, nav {
+  background-color: #13151d !important; border-bottom: 1px solid #2a2e3e !important;
+}
+.ui.menu .item, .ui.menu a.item, .ui.menu .item > a { color: #8890a4 !important; }
+.ui.menu .item:hover, .ui.menu a.item:hover { background-color: #1e2130 !important; color: #d0d4e0 !important; }
+.ui.menu .item.active, .ui.menu .active.item, .ui.menu a.item.active { background-color: #1e2130 !important; color: #4a9eff !important; border-color: #4a9eff !important; }
+.ui.menu .item i.icon { color: inherit !important; }
+.ui.vertical.menu, .ui.vertical.icon.menu { background-color: #13151d !important; border-left: 1px solid #2a2e3e !important; }
+.ui.vertical.menu .item { color: #8890a4 !important; border-bottom: 1px solid #1e2130 !important; }
+.ui.vertical.menu .item:hover { background-color: #1e2130 !important; color: #d0d4e0 !important; }
+.ui.vertical.menu .item.active { background-color: #1e2130 !important; color: #4a9eff !important; }
+
+/* Semantic UI's `.text` menu variant is meant to be chrome-less (no
+   background, no border) so it blends into whatever contains it — e.g.
+   the file-row action popup (Download/Find NFO/Search/...) renders its
+   items in a `.ui.text.menu.vertical`, sitting INSIDE an outer `.ui.popup`
+   box that already has its own themed background/border. The generic
+   `.ui.menu`/`.ui.vertical.menu` rules above were overriding this and
+   giving the inner menu its own separate background + border too,
+   producing a visible double box/"frame" effect. Excluding `.text.menu`
+   here restores the single-box look (the chat user-context dropdown,
+   which doesn't use a `.text.menu`, was never affected). */
+.ui.text.menu, .ui.text.menu.vertical, .ui.menu.text {
+  background-color: transparent !important;
+  border: none !important;
+}
+
+/* === SEGMENTS / PANELS === */
+.ui.segment, .ui.segments, .ui.segments .segment,
+.ui.raised.segment, .ui.stacked.segment, .ui.piled.segment {
+  background-color: rgba(24, 26, 34, 0.85) !important;
+  border: 1px solid rgba(42, 46, 62, 0.6) !important;
+  color: #d0d4e0 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important;
+}
+.ui.segment .header, .ui.segment h3, .ui.segment h4,
+.header.layout, .header.layout.icon, .header.layout.icon.sectioned,
+.ui.segment .header.layout, .ui.segment .header.layout span,
+.ui.segment .header.layout .text { color: #d0d4e0 !important; }
+.ui.attached.segment, .ui.top.attached.segment, .ui.bottom.attached.segment { background-color: rgba(24, 26, 34, 0.85) !important; border-color: rgba(42, 46, 62, 0.6) !important; }
+.ui.basic.segment { background-color: transparent !important; }
+
+/* === HEADINGS === */
+h1, h2, h3, h4, h5, h6, .ui.header, .ui.header .content, .ui.sub.header { color: #d0d4e0 !important; }
+.ui.dividing.header { border-bottom-color: #2a2e3e !important; }
+
+/* Sub-header text (e.g. the download target path under a bundle's name in
+   Queue > Manage files...) uses the plain Fomantic UI class list "sub
+   header" — no "ui" class on that specific div (it's LayoutHeader.tsx's
+   `<div className="sub header">{subHeader}</div>`), so it never matched
+   the `.ui.sub.header` rule above and was left at Fomantic's dark default
+   text color, invisible against our dark background. Covering the
+   unprefixed `.sub.header` here, dimmer than the main heading text since
+   it's meant to read as secondary. */
+.sub.header { color: #8890a4 !important; }
+
+/* === LINKS (no !important to preserve dupe/share colors) === */
+a, a:link { color: #4a9eff; }
+a:hover { color: #6db3ff; }
+a:visited { color: #7c8aff; }
+
+/* === TABLES === */
+.ui.table { background-color: #181a22 !important; color: #d0d4e0 !important; border: 1px solid #2a2e3e !important; }
+.ui.table thead th { background-color: #1e2130 !important; color: #8890a4 !important; border-bottom: 1px solid #2a2e3e !important; }
+.ui.table tbody tr { background-color: #181a22 !important; }
+.ui.table tbody tr:nth-child(even) { background-color: #1c1e28 !important; }
+.ui.table tbody tr:hover { background-color: #262a3a !important; }
+.ui.table td { color: #d0d4e0 !important; border-top: 1px solid #222536 !important; }
+.ui.table tfoot th { background-color: #1e2130 !important; border-top: 1px solid #2a2e3e !important; }
+.ui.sortable.table thead th { background-color: #1e2130 !important; color: #8890a4 !important; }
+.ui.sortable.table thead th:hover { background-color: #262a3a !important; color: #d0d4e0 !important; }
+
+/* === FORMS / INPUTS === */
+.ui.input input, .ui.form input, .ui.form textarea, .ui.form select,
+input, textarea, select {
+  background-color: #1e2130 !important; color: #d0d4e0 !important;
+  border: 1px solid #2a2e3e !important; -webkit-text-fill-color: #d0d4e0 !important;
+}
+.ui.input input:focus, .ui.form input:focus, .ui.form textarea:focus, input:focus, textarea:focus {
+  background-color: #222536 !important; border-color: #4a9eff !important;
+  color: #d0d4e0 !important; -webkit-text-fill-color: #d0d4e0 !important;
+}
+input::placeholder, textarea::placeholder { color: #5a6178 !important; -webkit-text-fill-color: #5a6178 !important; }
+input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus, textarea:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0px 1000px #1e2130 inset !important;
+  -webkit-text-fill-color: #d0d4e0 !important; transition: background-color 5000s ease-in-out 0s;
+}
+input::selection, textarea::selection { background-color: #264f78 !important; color: #ffffff !important; }
+input::-moz-selection, textarea::-moz-selection { background-color: #264f78 !important; color: #ffffff !important; }
+.message-composer input, .message-composer textarea, [class*="composer"] input,
+[class*="composer"] textarea, [role="presentation"] input, [role="presentation"] textarea {
+  background-color: #1e2130 !important; color: #d0d4e0 !important; -webkit-text-fill-color: #d0d4e0 !important;
+}
+
+/* === BUTTONS === */
+.ui.button { background-color: #262a3a !important; color: #d0d4e0 !important; border: 1px solid #2a2e3e !important; }
+.ui.button:hover { background-color: #2d3348 !important; color: #ffffff !important; }
+.ui.primary.button { background-color: #4a9eff !important; color: #0f1117 !important; border: none !important; }
+.ui.primary.button:hover { background-color: #6db3ff !important; }
+.ui.positive.button, .ui.green.button { background-color: #48c78e !important; color: #0f1117 !important; }
+.ui.negative.button, .ui.red.button { background-color: #f14668 !important; color: #ffffff !important; }
+
+/* === DROPDOWNS === */
+.ui.dropdown .menu, .ui.selection.dropdown .menu { background-color: #1e2130 !important; border-color: #2a2e3e !important; }
+.ui.dropdown .menu > .item { color: #d0d4e0 !important; }
+.ui.dropdown .menu > .item:hover, .ui.dropdown .menu .active.item { background-color: #262a3a !important; color: #ffffff !important; }
+.ui.selection.dropdown { background-color: #1e2130 !important; color: #d0d4e0 !important; border-color: #2a2e3e !important; }
+.ui.dropdown > .text { color: #d0d4e0 !important; }
+.ui.dropdown .menu > .divider { border-top-color: #2a2e3e !important; }
+.ui.dropdown .menu > .header { color: #8890a4 !important; }
+
+/* === MODALS / POPUPS === */
+.ui.modal, .ui.modal > .content, .ui.modal > .header, .ui.modal > .actions {
+  background-color: #181a22 !important; color: #d0d4e0 !important; border-color: #2a2e3e !important;
+}
+.ui.dimmer { background-color: rgba(0, 0, 0, 0.75) !important; }
+.ui.popup { background-color: #181a22 !important; color: #d0d4e0 !important; border: 1px solid #2a2e3e !important; }
+.ui.popup::before { background-color: #181a22 !important; border-color: #2a2e3e !important; }
+
+/* === LABELS === */
+.ui.label { background-color: #262a3a !important; color: #d0d4e0 !important; border: 1px solid #2a2e3e !important; }
+.ui.blue.label { background-color: #4a9eff !important; color: #0f1117 !important; }
+.ui.green.label { background-color: #48c78e !important; color: #0f1117 !important; }
+.ui.red.label { background-color: #f14668 !important; color: #ffffff !important; }
+.ui.orange.label, .ui.yellow.label { background-color: #f0a020 !important; color: #0f1117 !important; }
+.ui.label.circular, .ui.floating.label { color: #ffffff !important; }
+
+/* === MESSAGES === */
+.ui.message { background-color: #1e2130 !important; color: #d0d4e0 !important; border: 1px solid #2a2e3e !important; }
+.ui.info.message { background-color: #182538 !important; border-color: #2a4a6e !important; }
+.ui.success.message, .ui.positive.message { background-color: #1a2e24 !important; border-color: #2a5e3e !important; }
+.ui.error.message, .ui.negative.message { background-color: #2e1a1e !important; border-color: #5e2a3e !important; }
+.ui.warning.message { background-color: #2e2a1a !important; border-color: #5e4a2a !important; }
+
+/* === TABS === */
+.ui.tabular.menu { border-bottom-color: #2a2e3e !important; }
+.ui.tabular.menu .item { background-color: transparent !important; color: #8890a4 !important; }
+.ui.tabular.menu .active.item { background-color: #181a22 !important; color: #d0d4e0 !important; border-color: #2a2e3e !important; border-bottom-color: #181a22 !important; }
+
+/* === MISC UI === */
+.ui.progress { background-color: #1e2130 !important; }
+.ui.progress .bar { background-color: #4a9eff !important; }
+.ui.loader:after { border-color: #4a9eff transparent transparent !important; }
+.ui.sidebar, .ui.left.sidebar, .ui.right.sidebar { background-color: #13151d !important; border-color: #2a2e3e !important; }
+.ui.divider { border-color: #2a2e3e !important; color: #8890a4 !important; }
+hr { border-color: #2a2e3e !important; }
+i.icon { color: #b0b8cc !important; }
+.ui.statistic > .value { color: #d0d4e0 !important; }
+.ui.statistic > .label { color: #8890a4 !important; }
+.ui.list .item, .ui.list .item .header { color: #d0d4e0 !important; }
+.ui.list .item .description { color: #8890a4 !important; }
+.ui.divided.list .item { border-top-color: #2a2e3e !important; }
+.ui.card, .ui.cards > .card,
+.card.widget, .react-grid-layout .widget, .react-grid-item .card.widget {
+  background-color: #181a22 !important;
+  border: 1px solid #2a2e3e !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+.ui.card > .content, .card.widget > .content { border-top-color: #2a2e3e !important; }
+.ui.card > .content > .header { color: #d0d4e0 !important; }
+.ui.card > .content > .description { color: #8890a4 !important; }
+.ui.accordion .title, .ui.accordion .content { color: #d0d4e0 !important; }
+
+/* === ApexCharts tooltips (Transfers widget graph hover box) === */
+.apexcharts-tooltip {
+  background-color: #181a22 !important;
+  color: #d0d4e0 !important;
+  border: 1px solid #2a2e3e !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}
+.apexcharts-tooltip-title {
+  background-color: #1e2130 !important;
+  color: #8890a4 !important;
+  border-bottom: 1px solid #2a2e3e !important;
+}
+.apexcharts-tooltip-text, .apexcharts-tooltip-y-group, .apexcharts-tooltip-text-label,
+.apexcharts-tooltip-text-value, .apexcharts-tooltip-series-group {
+  color: #d0d4e0 !important;
+}
+.apexcharts-xaxistooltip, .apexcharts-yaxistooltip {
+  background-color: #181a22 !important;
+  color: #d0d4e0 !important;
+  border: 1px solid #2a2e3e !important;
+}
+.apexcharts-xaxistooltip:before, .apexcharts-xaxistooltip:after,
+.apexcharts-yaxistooltip:before, .apexcharts-yaxistooltip:after {
+  border-color: transparent !important;
+}
+.apexcharts-xaxistooltip:before { border-bottom-color: #2a2e3e !important; }
+.apexcharts-xaxistooltip:after { border-bottom-color: #181a22 !important; }
+.apexcharts-tooltip *, .apexcharts-xaxistooltip *, .apexcharts-yaxistooltip * {
+  color: #d0d4e0 !important;
+}
+.ui.breadcrumb { color: #8890a4 !important; }
+.ui.breadcrumb a { color: #4a9eff !important; }
+.ui.pagination.menu .item { background-color: #1e2130 !important; color: #d0d4e0 !important; }
+.ui.pagination.menu .active.item { background-color: #4a9eff !important; color: #0f1117 !important; }
+.ui.checkbox label, .ui.radio.checkbox label { color: #d0d4e0 !important; }
+.ui.checkbox input:checked ~ label:before { background-color: #4a9eff !important; border-color: #4a9eff !important; }
+.ui.toggle.checkbox label:before { background-color: #2a2e3e !important; }
+.ui.toggle.checkbox input:checked ~ label:before { background-color: #48c78e !important; }
+
+/* === SCROLLBARS === */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0f1117; }
+::-webkit-scrollbar-thumb { background: #2a2e3e; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3f52; }
+
+/* === CANVAS === */
+canvas { background-color: #0f1117 !important; opacity: 0.9; }
+
+/* === MISC === */
+code, pre { background-color: #1e2130 !important; border-color: #2a2e3e !important; }
+[data-tooltip]:after { background-color: #1e2130 !important; color: #d0d4e0 !important; border: 1px solid #2a2e3e !important; }
+[data-tooltip]:before { background-color: #1e2130 !important; }
+.ui.placeholder.segment { background-color: #13151d !important; border: 2px dashed #2a2e3e !important; }
+.date, .meta, time { color: #5a6178 !important; }
+
+/* === SECONDARY POINTING MENU === */
+.ui.secondary.pointing.menu { border-bottom-color: #2a2e3e !important; background-color: transparent !important; }
+.ui.secondary.pointing.menu .item { border-bottom-color: transparent !important; color: #8890a4 !important; background-color: transparent !important; }
+.ui.secondary.pointing.menu .active.item { border-bottom-color: #4a9eff !important; color: #4a9eff !important; background-color: transparent !important; }
+.ui.grid, .ui.grid > .row, .ui.grid > .column, .ui.grid > .row > .column { background-color: transparent !important; }
+.ui.items > .item { border-bottom: 1px solid #1e2130 !important; color: #d0d4e0 !important; }
+.ui.items > .item:hover { background-color: #181a22 !important; }
+
+/* Fomantic UI's "Item" component (used e.g. by Settings > Extensions >
+   Manage installed, each row being `.item.extension`) hardcodes `.meta`
+   and `.extra` text to a semi-transparent black, tuned for light
+   backgrounds — "by <author>", "Non-listed extension", and the
+   Latest/Installed version lines all inherit that and go nearly
+   invisible on our dark background. Nothing else in this file already
+   overrides `.meta`/`.extra`, so add it here. */
+.ui.items > .item .meta,
+.ui.items > .item .extra {
+  color: #8890a4 !important;
+}
+.ui.items > .item .extra .outdated {
+  color: #f0a020 !important;
+}
+.ui.items > .item .extra .latest {
+  color: #48c78e !important;
+}
+.ui.feed, .ui.feed > .event { color: #d0d4e0 !important; background-color: transparent !important; }
+.ui.feed > .event { border-bottom: 1px solid #1e2130 !important; }
+
+/* ============================================================
+   AIRDCPP-SPECIFIC (targeted fixes only, no global catch-alls)
+   ============================================================ */
+
+/* Right sidebar icons */
+/* The page kept jumping left-right on navigation because #side-menu uses
+   overflow-y: auto — its scrollbar only shows up when the icon list is
+   just barely taller than the viewport, and that threshold flips as the
+   available height recalculates per page. Each flip adds/removes the
+   scrollbar's width, shifting the whole layout by a few pixels. Below
+   the app's own mobile breakpoint this bar switches to a different
+   layout entirely, so there's no viewport width where this short, fixed
+   set of icons can realistically run out of vertical room — removing
+   the scroll entirely (rather than just reserving its space) is safe
+   and stops the jump outright. */
+#side-menu {
+  overflow-y: hidden !important;
+  scrollbar-gutter: auto !important;
+}
+#side-menu { background-color: #13151d !important; border-left: 1px solid #2a2e3e !important; }
+#side-menu i.icon, .ui.vertical.icon.menu i.icon { color: #c0c8dc !important; }
+#side-menu .item:hover i.icon { color: #ffffff !important; }
+#side-menu .item.active i.icon { color: #4a9eff !important; }
+#side-menu .item, #side-menu .item span { color: #b0b8cc !important; }
+
+/* Away mode icon (AwayIcon.tsx): the app expresses its state only through
+   Fomantic's colour class — `yellow` when away is on, `grey` when off —
+   with no .active/.disabled class. The blanket `#side-menu i.icon` rule
+   above forces every sidebar icon to one colour with !important, which
+   flattened both states to the same shade. These more specific rules
+   (ID + 4 classes) restore the two states, for the desktop side menu and
+   the mobile menu. Scoped to `.away-state` so no other icon is affected. */
+#side-menu i.icon.away-state.yellow,
+#mobile-menu i.icon.away-state.yellow { color: #f0c020 !important; }
+#side-menu i.icon.away-state.grey,
+#mobile-menu i.icon.away-state.grey { color: #5a6178 !important; }
+#side-menu i.icon.away-state:hover,
+#mobile-menu i.icon.away-state:hover { filter: brightness(1.25); }
+
+/* Session content panel */
+#session-content-panel { background-color: rgba(15, 17, 23, 0.9) !important; color: #d0d4e0 !important; }
+
+/* Sidebar/session containers */
+#sidebar-container, #sidebar, .session-container, .session-container.horizontal { background-color: #13151d !important; }
+.menu-column, nav.menu-column, nav[aria-label="session items"] { background-color: #13151d !important; border-right: 1px solid #2a2e3e !important; }
+.menu-column .item, nav.menu-column .item { background-color: transparent !important; color: #d0d4e0 !important; border-bottom: 1px solid #1e2130 !important; }
+.menu-column .item:hover { background-color: #1e2130 !important; }
+.menu-column .item.active { background-color: #1e2130 !important; color: #4a9eff !important; }
+
+/* Footer / status bar */
+footer, .footer, .table-footer, [class*="footer"] {
+  background-color: #13151d !important; background-image: none !important;
+  color: #d0d4e0 !important; border-top: 1px solid #2a2e3e !important;
+}
+.ui.bottom.attached.segment, .ui.bottom.attached.menu, .ui.bottom.segment, .ui.bottom.menu, .ui.attached.menu {
+  background-color: #13151d !important; border-color: #2a2e3e !important; color: #d0d4e0 !important;
+}
+[class*="filter"] { background-color: #13151d !important; color: #d0d4e0 !important; }
+
+/* Events page */
+[class*="event"] { color: #d0d4e0 !important; }
+
+/* Chat nicknames */
+.header.author, .chat.item .author, .chat.session .chat.item .author { color: #4a9eff !important; }
+.header.author .ui.dropdown, .header.author .user-menu,
+.chat.item .author .ui.dropdown, .chat.item .author .ui.dropdown .text,
+.chat.item .author a, .chat.item .header a { color: #4a9eff !important; }
+.chat.item.ccpm .header.author, .chat.item.ccpm .header.author .ui.dropdown,
+.chat.item.ccpm .header.author .ui.dropdown.item.user-menu { color: #48c78e !important; }
+.chat.item.asch.self .header.author, .chat.item.asch.self .header.author .ui.dropdown,
+.chat.item.asch.self .header.author .ui.dropdown.item.user-menu { color: #f0a020 !important; }
+.header.author [role="menuitem"], .header.author [aria-haspopup], .header.author [tabindex] { color: #4a9eff !important; }
+.chat.item.asch.self .header.author [role="menuitem"], .chat.item.asch.self .header.author [aria-haspopup] { color: #f0a020 !important; }
+
+/* Make nicknames selectable when highlighting text */
+.header.author,
+.header.author .ui.dropdown,
+.header.author .ui.dropdown.item.user-menu,
+.header.author .caption,
+.header.author div.caption,
+.header.author div.caption[role="button"],
+.ui.dropdown:not(.button) > .caption {
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  user-select: text !important;
+  overflow: visible !important;
+}
+
+/* Caption fix (app sets .caption black !important) */
+body .caption, body div.caption, body div.caption[role="button"],
+body .header.author .caption,
+body .chat.session .chat.item .author .caption,
+body .chat.session .chat.item.self .author .caption,
+body .private.chat.session .chat.item .author .caption,
+body .private.chat.session .chat.item.self .author .caption,
+body .ui.dropdown .caption, body .ui.dropdown.item.user-menu .caption { color: #4a9eff !important; }
+body .chat.item.asch.self .header.author .caption,
+body .chat.session .chat.item.asch.self .author .caption,
+body .private.chat.session .chat.item.asch.self .author .caption { color: #f0a020 !important; }
+body .chat.item.ccpm .header.author .caption,
+body .chat.session .chat.item.ccpm .author .caption,
+body .private.chat.session .chat.item.ccpm .author .caption { color: #48c78e !important; }
+
+/* Chat text */
+.chat.item .text, .chat.item div.text, .message-section.chat div.text { color: #d0d4e0 !important; }
+.chat.item .time, .chat.item time { color: #5a6178 !important; }
+
+/* High-specificity dropdown menus */
+.ui.dropdown .menu, .ui.dropdown .menu.visible, .ui.dropdown .menu.transition,
+.ui.pointing.dropdown > .menu, div.ui.dropdown .menu, .ui.simple.dropdown .menu {
+  background-color: #181a22 !important; border: 1px solid #2a2e3e !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}
+.ui.dropdown .menu > .item, .ui.dropdown .menu > a.item { color: #d0d4e0 !important; background-color: transparent !important; }
+.ui.dropdown .menu > .item:hover, .ui.dropdown .menu > a.item:hover { background-color: #262a3a !important; color: #ffffff !important; }
+.ui.dropdown .menu > .item i.icon { color: #8890a4 !important; }
+.ui.dropdown .menu > .item:hover i.icon { color: #d0d4e0 !important; }
+body .ui.menu .ui.dropdown .menu > .item,
+body .ui.menu .ui.dropdown .menu > a.item,
+body .ui.menu .ui.dropdown .menu > div.item,
+body .ui.menu .ui.dropdown .menu > .item span,
+body .ui.menu .ui.dropdown .menu > .item .name,
+body .ui.menu .ui.dropdown .menu > .item .text { color: #d0d4e0 !important; }
+body .ui.menu .ui.dropdown .menu > .item:hover,
+body .ui.menu .ui.dropdown .menu > a.item:hover,
+body .ui.menu .ui.dropdown .menu > .item:hover span { color: #ffffff !important; background-color: #262a3a !important; }
+body .ui.menu .ui.dropdown .menu > .item i.icon { color: #8890a4 !important; }
+body .ui.menu .ui.dropdown .menu > .item:hover i.icon { color: #d0d4e0 !important; }
+body .ui.menu .ui.dropdown .menu { background-color: #181a22 !important; border: 1px solid #2a2e3e !important; }
+.ui.menu .ui.dropdown .menu > .ui.divider, .ui.menu .ui.dropdown .menu > .divider { border-color: #2a2e3e !important; }
+
+/* Toastify */
+.Toastify, .Toastify__toast-container, .Toastify__toast, .Toastify__toast-body,
+.Toastify__toast--default, .Toastify__toast--info, .Toastify__toast--success,
+.Toastify__toast--warning, .Toastify__toast--error {
+  background-color: #181a22 !important; color: #d0d4e0 !important;
+  border: 1px solid #2a2e3e !important; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}
+.Toastify__close-button { color: #8890a4 !important; }
+.Toastify__progress-bar { background-color: #4a9eff !important; }
+
+/* Settings */
+body .ui.segment.settings-layout, body .ui.segment.settings-layout .full,
+body #setting-scroll-context, body #settings-content-panel,
+body .ui.secondary.pointing.menu.settings.top-menu,
+body .settings-layout, body .section-content { background-color: #0f1117 !important; }
+body .three.wide.column.menu-column { background-color: #13151d !important; }
+body #settings-content-panel > .ui.segment, body #settings-content-panel .ui.segment { background-color: #181a22 !important; }
+body .ui.secondary.pointing.menu .item, body .ui.tabular.menu .item { color: #8890a4 !important; }
+body .ui.secondary.pointing.menu .item:hover, body .ui.tabular.menu .item:hover { color: #d0d4e0 !important; }
+body .ui.secondary.pointing.menu .item.active, body .ui.tabular.menu .item.active { color: #4a9eff !important; border-color: #4a9eff !important; }
+body .ui.vertical.menu .item, body .ui.vertical.pointing.menu .item { color: #8890a4 !important; background-color: transparent !important; }
+body .ui.vertical.menu .item:hover { color: #d0d4e0 !important; background-color: #1e2130 !important; }
+body .ui.vertical.menu .item.active { color: #4a9eff !important; background-color: #1e2130 !important; }
+body .ui.vertical.menu .item .header { color: #d0d4e0 !important; }
+body .ui.form .field > label, body .ui.form label, body label { color: #d0d4e0 !important; }
+body .ui.segment .meta, body .ui.segment .description { color: #8890a4 !important; }
+
+/* Login */
+form[name="login"] .ui.segment, form[name="login"] .ui.stacked.segment, form.ui.large.form .ui.stacked.segment {
+  background-color: #181a22 !important; border: 1px solid #2a2e3e !important; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+}
+.login-grid, .ui.middle.aligned.center.aligned.grid.login-grid,
+.ui.middle.aligned.center.aligned.grid.login-grid .column { background-color: transparent !important; border: none !important; box-shadow: none !important; }
+.ui.form .field .icon, .ui.icon.input > i.icon { color: #8890a4 !important; }
+.ui.form .ui.button { background-color: #4a9eff !important; color: #0f1117 !important; font-weight: 700 !important; }
+.ui.form .ui.button:hover { background-color: #6db3ff !important; }
+.ui.form .field .ui.checkbox label { color: #d0d4e0 !important; }
+
+/* Dupe/share colors */
+.dupe, .dupe .caption, .dupe .file-name, .dupe .icon-caption, .dupe .popup.trigger,
+.cell-wrapper.dupe, .cell-wrapper.dupe .caption, .cell-wrapper.dupe .file-name,
+.cell-wrapper.name.dupe .caption, .cell-wrapper.name.dupe .file-name,
+.cell-wrapper.name.dupe.share .caption, .cell-wrapper.name.dupe.share .file-name,
+.cell-wrapper.name.dupe.share.full .caption, .cell-wrapper.name.dupe.share.full .file-name { color: #cc66ff !important; }
+.cell-wrapper.name.download .caption, .cell-wrapper.name.download .file-name { color: #48c78e !important; }
+
+/* FixedDataTable */
+.fixedDataTableLayout_main, .fixedDataTableLayout_rowsContainer,
+.fixedDataTableRowLayout_body, .fixedDataTableRowLayout_main,
+.fixedDataTableCellLayout_main, .public_fixedDataTable_main,
+.public_fixedDataTable_bodyRow, .public_fixedDataTableCell_main,
+.public_fixedDataTableRow_main,
+[class*="fixedDataTable"], [class*="fixedDataTableRow"], [class*="fixedDataTableCell"] {
+  background-color: #0f1117 !important; color: #d0d4e0 !important;
+}
+[role="columnheader"] { background-color: #1e2130 !important; color: #8890a4 !important; border-right: 1px solid #2a2e3e !important; border-bottom: 1px solid #3a3f52 !important; }
+[role="columnheader"] a, [role="columnheader"] .button.link, [role="columnheader"] span, [role="columnheader"] div { color: #8890a4 !important; }
+[role="columnheader"]:hover a, [role="columnheader"]:hover .button.link { color: #d0d4e0 !important; }
+.public_fixedDataTableCell_cellContent,
+[class*="fixedDataTableCell"] div, [class*="fixedDataTableCell"] span, [class*="fixedDataTableCell"] a { color: #d0d4e0 !important; }
+.cell-wrapper, .cell-wrapper span, .cell-wrapper div, .cell-wrapper a { color: #d0d4e0 !important; }
+.public_fixedDataTableRow_highlighted, .public_fixedDataTableRow_main:hover,
+[class*="fixedDataTableRow"]:hover [class*="fixedDataTableCell"] { background-color: #1e2130 !important; }
+.public_fixedDataTableRow_main, [class*="fixedDataTableRow_main"] { border-bottom: 1px solid #2a2e3e !important; }
+.fixedDataTableCellLayout_main, .public_fixedDataTableCell_main, [class*="fixedDataTableCell_main"] { border-right: 1px solid #2a2e3e !important; border-bottom: 1px solid #2a2e3e !important; }
+.fixedDataTableLayout_main, .public_fixedDataTable_main, [class*="fixedDataTable_main"] { border: 1px solid #2a2e3e !important; }
+.cell-wrapper.dupe .caption, .cell-wrapper.dupe .file-name, .cell-wrapper.dupe .icon-caption,
+.cell-wrapper.name.dupe a, .cell-wrapper.name.dupe span,
+.cell-wrapper.name.dupe.share a, .cell-wrapper.name.dupe.share span,
+.cell-wrapper.name.dupe.share.full a, .cell-wrapper.name.dupe.share.full span { color: #cc66ff !important; }
+.cell-wrapper.download a, .cell-wrapper.download span { color: #48c78e !important; }
+
+/* Hub user list nick colours — kept as close to stock AirDC++ as possible.
+   Stock: a normal user's nick is plain inherited text colour, and an
+   operator's nick is `steelblue` (`.hub.session .cell-wrapper.nick.op` in
+   the app's Hubs/style.css); nothing else in the table is coloured.
+   Two blanket rules in this file broke that — the table-cell text rule
+   above (every cell forced to one colour) and the `.caption` fix (every
+   caption forced blue, meant for chat authors) — so all nicks looked the
+   same. These restore stock: normal users get the theme's text colour,
+   operators get steelblue. Scoped to the hub user list (`.hub.session`),
+   so chat and other tables are untouched. */
+body .hub.session .cell-wrapper.nick,
+body .hub.session .cell-wrapper.nick .caption,
+body .hub.session .cell-wrapper.nick .icon-caption,
+body .hub.session .cell-wrapper.nick span,
+body .hub.session .cell-wrapper.nick div,
+body .hub.session .cell-wrapper.nick a { color: #d0d4e0 !important; }
+body .hub.session .cell-wrapper.nick.op,
+body .hub.session .cell-wrapper.nick.op .caption,
+body .hub.session .cell-wrapper.nick.op .icon-caption,
+body .hub.session .cell-wrapper.nick.op span,
+body .hub.session .cell-wrapper.nick.op div,
+body .hub.session .cell-wrapper.nick.op a { color: steelblue !important; }
+
+/* Hub user list icons: the app colours each user's icon by status via
+   Fomantic colour classes on the <i> — green = online, yellow = away,
+   blue = bot, red = ignored, plus the small corner badge (yellow shield for
+   operators, blue star for yourself, red plug / orange shield for
+   no-connect / passive). The blanket `i.icon { color: #b0b8cc !important }`
+   rule further up flattens every icon in the app to one grey, which is why
+   all users looked identical. These restore Fomantic's stock colours for
+   nick-cell icons only (`.cell-wrapper.nick`), so no other icon changes. */
+body .cell-wrapper.nick i.icon.green  { color: #21ba45 !important; }
+body .cell-wrapper.nick i.icon.yellow { color: #fbbd08 !important; }
+body .cell-wrapper.nick i.icon.blue   { color: #2185d0 !important; }
+body .cell-wrapper.nick i.icon.red    { color: #db2828 !important; }
+body .cell-wrapper.nick i.icon.orange { color: #f2711c !important; }
+body .cell-wrapper.nick i.icon.grey   { color: #767676 !important; }
+
+/* === Events page === */
+.message-section.events,
+.message-section.events[role="article"],
+.layout-content.system-log,
+.simple-layout,
+.simple-layout .wrapper,
+.simple-layout .layout-content {
+  background-color: #0f1117 !important;
+  color: #d0d4e0 !important;
+}
+
+/* === Filter/search inputs (Filelists, Messages — react-select) === */
+/* The outermost react-select container */
+.css-b62m3t-container,
+[class*="css-"][class*="container"] {
+  background-color: transparent !important;
+  border: none !important;
+}
+/* The control bar (the visible input area) */
+[class*="css-"][class*="control"] {
+  background-color: #1e2130 !important;
+  border-color: #2a2e3e !important;
+  color: #d0d4e0 !important;
+  min-height: auto !important;
+}
+/* Inner grid/value wrappers — must be transparent */
+[class*="css-hlgw"],
+[class*="css-19bb5b"],
+[class*="css-"][data-value] {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+/* The actual input element inside react-select */
+[class*="css-"] input,
+[class*="css-"] input[role="combobox"],
+.session-new input,
+[id*="react-select"] {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #d0d4e0 !important;
+  -webkit-text-fill-color: #d0d4e0 !important;
+  border: none !important;
+  outline: none !important;
+}
+[class*="css-"][class*="placeholder"] { color: #5a6178 !important; }
+[class*="css-"][class*="singleValue"],
+[class*="css-"][class*="input"] { color: #d0d4e0 !important; }
+[class*="css-"][class*="menu"],
+[class*="css-"][class*="menuList"] { background-color: #1e2130 !important; color: #d0d4e0 !important; }
+[class*="css-"][class*="option"] { background-color: #1e2130 !important; color: #d0d4e0 !important; }
+[class*="css-"][class*="option"]:hover { background-color: #262a3a !important; }
+
+/* === Widget titles (card headers — app sets rgba(0,0,0,.87)) === */
+body .ui.cards > .card > .content > .header,
+body .ui.card > .content > .header,
+body .ui.cards > .card > .content > .header:not(.ui),
+body .content.header-row .header,
+body .content.header-row div.header,
+body .react-grid-layout .widget .header,
+body .react-grid-layout .widget .content.header-row .header,
+body .card.widget .header,
+body .card.widget .content .header,
+body .card.widget .content.header-row .header,
+body .card.widget .content.header-row div.header {
+  color: #d0d4e0 !important;
+}
+
+/* === Bot/system message nicknames === */
+.chat.item.mndc .header.author,
+.chat.item.mndc .header.author .ui.dropdown,
+.chat.item.mndc.op .header.author,
+.chat.item.mndc.op .header.author .ui.dropdown,
+.chat.item.mndc.bot .header.author,
+.chat.item.mndc.bot .header.author .ui.dropdown {
+  color: #8890a4 !important;
+}
+
+/* Ensure ALL chat captions are visible — must beat chat.css specificity */
+/* Default: blue */
+body .chat.session .chat.item .caption,
+body .chat.session .chat.item .header.author .caption,
+body .chat.session .chat.item div.caption,
+body .chat.session .chat.item div.caption[role="button"],
+body .private.chat.session .chat.item .caption,
+body .private.chat.session .chat.item .header.author .caption,
+body .private.chat.session .chat.item div.caption {
+  color: #4a9eff !important;
+}
+/* Self messages: orange */
+body .chat.session .chat.item.self .caption,
+body .chat.session .chat.item.self .header.author .caption,
+body .chat.session .chat.item.self div.caption,
+body .chat.session .chat.item.asch.self .caption,
+body .chat.session .chat.item.asch.self .header.author .caption,
+body .chat.session .chat.item.asch.self div.caption,
+body .chat.session .chat.item.ccpm.asch.self .caption,
+body .chat.session .chat.item.ccpm.asch.self .header.author .caption,
+body .private.chat.session .chat.item.self .caption,
+body .private.chat.session .chat.item.asch.self .caption,
+body .private.chat.session .chat.item.asch.self .header.author .caption {
+  color: #f0a020 !important;
+}
+/* Other users: green */
+body .chat.session .chat.item.ccpm .caption,
+body .chat.session .chat.item.ccpm .header.author .caption,
+body .chat.session .chat.item.ccpm div.caption,
+body .private.chat.session .chat.item.ccpm .caption,
+body .private.chat.session .chat.item.ccpm .header.author .caption,
+body .private.chat.session .chat.item.ccpm div.caption {
+  color: #48c78e !important;
+}
+/* Bot/system: grey — must also beat chat.css .chat.session .chat.item.bot .caption */
+body .chat.session .chat.item.bot .caption,
+body .chat.session .chat.item.bot .header.author .caption,
+body .chat.session .chat.item.bot div.caption,
+body .chat.session .chat.item.mndc .caption,
+body .chat.session .chat.item.mndc .header.author .caption,
+body .chat.session .chat.item.mndc div.caption,
+body .chat.session .chat.item.mndc.op .caption,
+body .chat.session .chat.item.mndc.op .header.author .caption,
+body .chat.session .chat.item.mndc.op.bot .caption,
+body .chat.session .chat.item.mndc.op.bot .header.author .caption,
+body .private.chat.session .chat.item.bot .caption,
+body .private.chat.session .chat.item.mndc .caption,
+body .private.chat.session .chat.item.mndc.op.bot .caption {
+  color: #8890a4 !important;
+}
+
+/* ============================================================
+   STACKING FIX — breadcrumb/dropdown items above the file list
+   getting covered by the file list itself.
+
+   Cause: `.ui.segment` has `backdrop-filter: blur(10px) !important`,
+   which forces the segment to create a new CSS stacking context.
+   FixedDataTable (the library behind Filelist/Queue/Search/Transfers/
+   hub user lists) also positions its rows with `transform`, which
+   creates its own stacking context. When both live under the same
+   blurred segment, the table's stacking context can end up painting
+   above an open dropdown/breadcrumb menu, no matter how high that
+   menu's z-index is, because z-index only fights it out *within* a
+   shared stacking context.
+
+   Fix: pin any open dropdown/popup menu to a very high explicit
+   stacking layer. (An earlier version of this fix also forced every
+   FixedDataTable instance sitewide down to z-index:0, which was too
+   broad — it ended up letting the blurred/GPU-composited table content
+   in the hub user list paint over the session name bar above it. That
+   part is removed; raising the dropdown's own z-index is enough for
+   the original bug on its own.)
+   ============================================================ */
+.ui.dropdown .menu,
+.ui.dropdown .menu.transition,
+.ui.dropdown .menu.visible,
+.ui.dropdown.active > .menu,
+.ui.active.selection.dropdown .menu,
+.ui.pointing.dropdown > .menu,
+.ui.upward.dropdown > .menu,
+.ui.simple.dropdown .menu,
+.ui.popup {
+  z-index: 99999 !important;
+}
+
+/* The dropdown's own positioned ancestor (breadcrumb/filter toolbar row)
+   must sit in front of the table below it once its menu is actually
+   open. Scoped to `.menu.visible` only (not just `.active`, which some
+   dropdown toggles — like a widget's "..." button — carry even while
+   closed, which previously made this rule apply to every widget panel
+   all the time and drew an unwanted border/seam on the dashboard). */
+.ui.segment:has(.ui.dropdown .menu.visible) {
+  z-index: 1 !important;
+}
+
+/* Root cause of "breadcrumb dropdown gets covered by the file list":
+   airdcpp-webui's own CSS sets `.filelist.session { overflow: hidden }`
+   (Filelists/style.css) around the whole browser+table area, purely to
+   keep the table's own scrolling contained. The breadcrumb bar and the
+   file table are plain sibling elements inside it — no z-index fight,
+   no separate stacking context — so when the breadcrumb's dropdown menu
+   opens and extends downward, that ancestor's `overflow: hidden` clips
+   it flush against the table below, which looks exactly like the table
+   "covering" it. z-index can't fix a clip. Scoped to `.filelist.session`
+   only (not every `.ui.segment`, which previously broke dashboard widget
+   borders and the hub user list) so this can't leak anywhere else. */
+.filelist.session:has(.ui.dropdown.download.active),
+.filelist.session:has(.ui.dropdown.item.download .menu.visible) {
+  overflow: visible !important;
+}
+
+/* That overflow fix alone wasn't enough: the overlap you're seeing isn't
+   actually a clip (a clip would cut the menu off cleanly with nothing
+   drawn there) — it's the table's own opaque rows painting on top of the
+   dropdown, a pure stacking-order problem. `.browserbar` is a `.ui.segment`,
+   and our base rule puts `backdrop-filter` on every segment, which makes
+   it own its own stacking context; its sibling `.virtual-table` (the
+   FixedDataTable wrapper, per airdcpp-webui's VirtualTable.tsx) positions
+   its rows with CSS transforms for virtualization, and backdrop-filter +
+   sibling-transform stacking is a known rendering-engine trouble spot
+   where z-index on the blurred segment doesn't reliably win. Pinning the
+   table itself to a low explicit z-index is what actually fixed this
+   before — just scoped this time to `.filelist.session` only, so it can't
+   reach the hub user list's table (a different, unrelated view) the way
+   the earlier site-wide version did. */
+.filelist.session .virtual-table,
+.filelist.session [class*="fixedDataTable"] {
+  z-index: 0 !important;
+}
+
+/* ============================================================
+   DOWNLOAD / "Download to..." DIALOG
+   Right-hand content panel (Previous/Shared/Favorites paths) was
+   rendering with Fomantic's light defaults — white panel, dark/grey
+   text — while only the "Dupes" tab's empty-state `.ui.message`
+   looked right, because that's the only piece an existing rule
+   already covered. The dialog's own markup (airdcpp-webui
+   DownloadDialog.tsx / NormalDownloadLayout.tsx / PathList.tsx /
+   AccordionTargets.tsx) is plain Fomantic: `.ui.segment.main-content`
+   wraps a `.ui.relaxed.list` of `.item`s (Previous/Dupes) or a
+   `.ui.styled.accordion` of `.title`/`.content` pairs (Shared/
+   Favorites), and a hardcoded `.disk-info { color: black }` rule in
+   the app's own style.css. None of the existing generic `.ui.list`/
+   `.ui.accordion` rules set a background, so these panels fell back
+   to the browser/Fomantic default instead of inheriting the dark
+   `.ui.segment` background. Scoped tightly to `.download-dialog` and
+   placed last so it wins any ordering ties. */
+.download-dialog .ui.segment.main-content {
+  background-color: #181a22 !important;
+}
+.download-dialog .ui.list,
+.download-dialog .ui.relaxed.list {
+  background-color: transparent !important;
+}
+.download-dialog .ui.list .item {
+  background-color: transparent !important;
+  color: #d0d4e0 !important;
+  border-top-color: #2a2e3e !important;
+}
+.download-dialog .ui.list .item .link-button,
+.download-dialog .ui.list .item a {
+  color: #4a9eff !important;
+}
+.download-dialog .ui.list .item a:hover {
+  color: #6db3ff !important;
+}
+.download-dialog .ui.list .item i.icon {
+  color: #8890a4 !important;
+}
+.download-dialog .disk-info {
+  color: #8890a4 !important;
+}
+.download-dialog .ui.styled.accordion {
+  background-color: transparent !important;
+  border-color: #2a2e3e !important;
+  box-shadow: none !important;
+}
+.download-dialog .ui.accordion .title {
+  background-color: #181a22 !important;
+  color: #d0d4e0 !important;
+  border-color: #2a2e3e !important;
+}
+.download-dialog .ui.accordion .title:hover {
+  background-color: #1e2130 !important;
+}
+.download-dialog .ui.accordion .content {
+  background-color: #13151d !important;
+  color: #d0d4e0 !important;
+}
+.download-dialog .ui.accordion .title i.icon,
+.download-dialog .ui.accordion .title .icon.dropdown {
+  color: #8890a4 !important;
+}
+.download-dialog .ui.message {
+  background-color: #1e2130 !important;
+  color: #d0d4e0 !important;
+  border: 1px solid #2a2e3e !important;
+}
+.download-dialog .ui.message .header {
+  color: #d0d4e0 !important;
+}
+
+/* ============================================================
+   SETTINGS > SYSTEM > LOGGING
+   The page is a Fomantic `.ui.styled.accordion` of `.log-section`
+   blocks (each a `.title` holding a checkbox form + a `.content`
+   holding file/format fields). Fomantic gives styled accordions a
+   white/light background, and the app's own System/style.css adds
+   `.log-section > .active { background-color: whitesmoke }` for the
+   open section — together that rendered the page grey/white. Scoped to
+   `.system.logging` so no other accordion in the app is touched. */
+.system.logging .ui.styled.accordion {
+  background-color: transparent !important;
+  border: 1px solid #2a2e3e !important;
+  box-shadow: none !important;
+}
+.system.logging .ui.styled.accordion .log-section,
+.system.logging .ui.styled.accordion .title,
+.system.logging .ui.styled.accordion .content {
+  background-color: #181a22 !important;
+  color: #d0d4e0 !important;
+  border-color: #2a2e3e !important;
+}
+.system.logging .log-section > .active,
+.system.logging .ui.styled.accordion .title.active,
+.system.logging .ui.styled.accordion .content.active {
+  background-color: #1e2130 !important;
+}
+.system.logging .ui.styled.accordion .title i.icon,
+.system.logging .ui.styled.accordion .title .icon.dropdown {
+  color: #8890a4 !important;
+}
+
+/* === FILELIST MULTI-SELECT === */
+.table-select-checkbox { accent-color: #4a9eff; }
+.table-selection-bar .selection-count { color: #d0d4e0 !important; }

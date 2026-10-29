@@ -1,0 +1,1180 @@
+diff --git a/src/components/table/TableContainer.tsx b/src/components/table/TableContainer.tsx
+index cbf7c2d..e60aac4 100644
+--- a/src/components/table/TableContainer.tsx
++++ b/src/components/table/TableContainer.tsx
+@@ -82,7 +82,8 @@ const TableContainer: React.FC<TableContainerProps> = (props) => {
+     }
+ 
+     return React.cloneElement(column, {
+-      header: (
++      // Columns may provide their own header (e.g. non-sortable selection columns)
++      header: column.props.header ?? (
+         <Plugins.ResizeCell onColumnResizeEnd={viewManager.onColumnResizeEndCallback}>
+           <HeaderCell
+             onClick={viewManager.onColumnClicked.bind(null, columnKey)}
+diff --git a/src/components/table/selection/SelectAllHeaderCell.tsx b/src/components/table/selection/SelectAllHeaderCell.tsx
+new file mode 100644
+index 0000000..a02dfe2
+--- /dev/null
++++ b/src/components/table/selection/SelectAllHeaderCell.tsx
+@@ -0,0 +1,117 @@
++import * as React from 'react';
++import { useTranslation } from 'react-i18next';
++import { Cell, CellProps } from 'fixed-data-table-2';
++
++import NotificationActions from '@/actions/NotificationActions';
++import { useSocket } from '@/context/SocketContext';
++import { translate } from '@/utils/TranslationUtils';
++import * as UI from '@/types/ui';
++
++import { TableSelectionItem } from './TableSelectionStore';
++import { useSelectedItems, useTableSelectionStore } from './TableSelectionContext';
++
++import './style.css';
++
++// Rows are requested in chunks to avoid very large API responses
++const ROWS_PER_REQUEST = 100;
++
++// The parts of a table view store (ViewStoreMixin) that are needed for fetching the rows
++export interface SelectableViewStore {
++  // Number of rows matching the current filter
++  rowCount: number;
++  viewUrl: string;
++  listen: (listener: () => void) => () => void;
++}
++
++export interface SelectAllHeaderCellProps extends CellProps {
++  viewStore: SelectableViewStore;
++  columnKey?: string; // CLONED by the table
++}
++
++// Header cell with a checkbox for selecting/deselecting all rows of the table view.
++// The rows are fetched from the API as most of them are not loaded in the table.
++// Only the rows matching the current filter are selected.
++export const SelectAllHeaderCell = ({
++  viewStore,
++  columnKey,
++  ...cellProps
++}: SelectAllHeaderCellProps) => {
++  const { t } = useTranslation();
++  const socket = useSocket();
++  const selection = useTableSelectionStore<TableSelectionItem>();
++  const selectedCount = useSelectedItems().length;
++  const [loading, setLoading] = React.useState(false);
++
++  // The view store isn't reactive, subscribe to count changes (filtering, new items...)
++  const subscribe = React.useCallback(
++    (listener: () => void) => viewStore.listen(listener),
++    [viewStore],
++  );
++  const rowCount = React.useSyncExternalStore(subscribe, () => viewStore.rowCount);
++
++  const allSelected = rowCount > 0 && selectedCount >= rowCount;
++  const partiallySelected = selectedCount > 0 && !allSelected;
++
++  const inputRef = React.useRef<HTMLInputElement>(null);
++  React.useEffect(() => {
++    if (inputRef.current) {
++      inputRef.current.indeterminate = partiallySelected;
++    }
++  }, [partiallySelected]);
++
++  const selectAll = async () => {
++    const generation = selection.getGeneration();
++    const total = viewStore.rowCount;
++
++    setLoading(true);
++    try {
++      const items: TableSelectionItem[] = [];
++      for (let start = 0; start < total; start += ROWS_PER_REQUEST) {
++        const end = Math.min(start + ROWS_PER_REQUEST, total);
++        const rows: TableSelectionItem[] = await socket.get(
++          `${viewStore.viewUrl}/items/${start}/${end}`,
++        );
++
++        if (selection.getGeneration() !== generation) {
++          // The selection was cleared (or the directory was changed) while fetching
++          return;
++        }
++
++        items.push(...rows);
++      }
++
++      selection.setManySelected(items);
++    } catch (e) {
++      NotificationActions.apiError(
++        translate('Failed to select all items', t, UI.Modules.COMMON),
++        e as Error,
++      );
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  const onChange = () => {
++    if (allSelected) {
++      selection.clear();
++    } else {
++      void selectAll();
++    }
++  };
++
++  return (
++    <Cell {...cellProps}>
++      <div className="table-select-all">
++        <input
++          ref={inputRef}
++          type="checkbox"
++          className="table-select-checkbox"
++          checked={allSelected}
++          disabled={loading || rowCount === 0}
++          aria-label={translate('Select all', t, UI.Modules.COMMON)}
++          onChange={onChange}
++        />
++      </div>
++    </Cell>
++  );
++};
+diff --git a/src/components/table/selection/SelectCell.tsx b/src/components/table/selection/SelectCell.tsx
+new file mode 100644
+index 0000000..14d286b
+--- /dev/null
++++ b/src/components/table/selection/SelectCell.tsx
+@@ -0,0 +1,36 @@
++import * as React from 'react';
++import { useTranslation } from 'react-i18next';
++
++import { translate } from '@/utils/TranslationUtils';
++import * as UI from '@/types/ui';
++
++import { TableSelectionItem } from './TableSelectionStore';
++import { useIsRowSelected, useTableSelectionStore } from './TableSelectionContext';
++
++import './style.css';
++
++export interface SelectCellProps<ItemT extends TableSelectionItem> {
++  // Provided by RowWrapperCell
++  rowDataGetter?: () => ItemT;
++}
++
++// Checkbox cell for selecting table rows (to be used with TableSelectionProvider)
++export const SelectCell = <ItemT extends TableSelectionItem & { name?: string }>({
++  rowDataGetter,
++}: SelectCellProps<ItemT>) => {
++  const { t } = useTranslation();
++  const store = useTableSelectionStore<ItemT>();
++
++  const item = rowDataGetter!();
++  const checked = useIsRowSelected(item.id);
++
++  return (
++    <input
++      type="checkbox"
++      className="table-select-checkbox"
++      checked={checked}
++      aria-label={`${translate('Select', t, UI.Modules.COMMON)} ${item.name ?? ''}`.trim()}
++      onChange={(evt) => store.setSelected(item, evt.target.checked)}
++    />
++  );
++};
+diff --git a/src/components/table/selection/SelectionBar.tsx b/src/components/table/selection/SelectionBar.tsx
+new file mode 100644
+index 0000000..ee5d574
+--- /dev/null
++++ b/src/components/table/selection/SelectionBar.tsx
+@@ -0,0 +1,52 @@
++import * as React from 'react';
++import { useTranslation } from 'react-i18next';
++
++import Button from '@/components/semantic/Button';
++import IconConstants from '@/constants/IconConstants';
++
++import { toI18nKey, translate } from '@/utils/TranslationUtils';
++import * as UI from '@/types/ui';
++
++import { TableSelectionItem } from './TableSelectionStore';
++import { useSelectedItems, useTableSelectionStore } from './TableSelectionContext';
++
++import './style.css';
++
++export interface SelectionBarProps {
++  // Called when the download button is clicked
++  onDownload: () => void;
++}
++
++// Table footer content that is displayed when there are selected rows
++export const SelectionBar: React.FC<SelectionBarProps> = ({ onDownload }) => {
++  const { t } = useTranslation();
++  const store = useTableSelectionStore<TableSelectionItem>();
++  const selected = useSelectedItems();
++
++  if (selected.length === 0) {
++    return null;
++  }
++
++  return (
++    <div className="table-selection-bar">
++      <span className="selection-count">
++        {t(toI18nKey('selectedCount', UI.Modules.COMMON), {
++          defaultValue: '{{count}} selected',
++          replace: { count: selected.length },
++        })}
++      </span>
++      <Button
++        className="tiny"
++        icon={IconConstants.DOWNLOAD}
++        caption={translate('Download', t, UI.Modules.COMMON)}
++        onClick={onDownload}
++      />
++      <Button
++        className="tiny basic"
++        icon={IconConstants.CLEAR}
++        caption={translate('Clear selection', t, UI.Modules.COMMON)}
++        onClick={store.clear}
++      />
++    </div>
++  );
++};
+diff --git a/src/components/table/selection/TableSelectionContext.tsx b/src/components/table/selection/TableSelectionContext.tsx
+new file mode 100644
+index 0000000..8a4bf55
+--- /dev/null
++++ b/src/components/table/selection/TableSelectionContext.tsx
+@@ -0,0 +1,40 @@
++import * as React from 'react';
++
++import {
++  SelectionKey,
++  TableSelectionItem,
++  TableSelectionStore,
++} from './TableSelectionStore';
++
++const TableSelectionContext = React.createContext<TableSelectionStore<any> | null>(null);
++
++export const TableSelectionProvider = <ItemT extends TableSelectionItem>({
++  store,
++  children,
++}: React.PropsWithChildren<{ store: TableSelectionStore<ItemT> }>) => (
++  <TableSelectionContext value={store}>{children}</TableSelectionContext>
++);
++
++export const useTableSelectionStore = <
++  ItemT extends TableSelectionItem,
++>(): TableSelectionStore<ItemT> => {
++  const store = React.use(TableSelectionContext);
++  if (!store) {
++    throw new Error('Table selection store is missing (TableSelectionProvider)');
++  }
++
++  return store;
++};
++
++// Re-renders only when the selection state of the given row changes
++export const useIsRowSelected = (id: SelectionKey) => {
++  const store = useTableSelectionStore();
++  return React.useSyncExternalStore(store.subscribe, () => store.isSelected(id));
++};
++
++// Re-renders whenever the selection changes
++export const useSelectedItems = <ItemT extends TableSelectionItem>() => {
++  const store = useTableSelectionStore<ItemT>();
++  const selected = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
++  return React.useMemo(() => Array.from(selected.values()), [selected]);
++};
+diff --git a/src/components/table/selection/TableSelectionStore.ts b/src/components/table/selection/TableSelectionStore.ts
+new file mode 100644
+index 0000000..b94a00c
+--- /dev/null
++++ b/src/components/table/selection/TableSelectionStore.ts
+@@ -0,0 +1,77 @@
++// Small external store for row selection in virtualized tables.
++//
++// Rows are loaded lazily and table cells are recycled, so the selection can't live in
++// the row components. The store keeps a snapshot of every selected item (not just the
++// IDs) so that bulk actions don't depend on the rows being loaded at the time.
++
++export type SelectionKey = string | number;
++
++export interface TableSelectionItem {
++  id: SelectionKey;
++}
++
++export class TableSelectionStore<ItemT extends TableSelectionItem> {
++  private selected: ReadonlyMap<SelectionKey, ItemT> = new Map();
++  private readonly listeners = new Set<() => void>();
++
++  // Increased every time the selection is cleared. Asynchronous operations (such as
++  // selecting all rows) can use this to detect that their result is outdated.
++  private generation = 0;
++
++  // Arrow functions so that these can be passed directly to useSyncExternalStore
++  subscribe = (listener: () => void) => {
++    this.listeners.add(listener);
++    return () => {
++      this.listeners.delete(listener);
++    };
++  };
++
++  // The returned map is never mutated (a new one is created on every change)
++  getSnapshot = (): ReadonlyMap<SelectionKey, ItemT> => this.selected;
++
++  getGeneration = () => this.generation;
++
++  isSelected = (id: SelectionKey) => this.selected.has(id);
++
++  getItems = (): ItemT[] => Array.from(this.selected.values());
++
++  setSelected = (item: ItemT, checked: boolean) => {
++    if (this.selected.has(item.id) === checked) {
++      return;
++    }
++
++    const next = new Map(this.selected);
++    if (checked) {
++      next.set(item.id, item);
++    } else {
++      next.delete(item.id);
++    }
++
++    this.update(next);
++  };
++
++  // Adds all items to the selection with a single change notification
++  setManySelected = (items: ItemT[]) => {
++    const next = new Map(this.selected);
++    items.forEach((item) => next.set(item.id, item));
++    if (next.size === this.selected.size) {
++      return;
++    }
++
++    this.update(next);
++  };
++
++  clear = () => {
++    this.generation++;
++    if (this.selected.size === 0) {
++      return;
++    }
++
++    this.update(new Map());
++  };
++
++  private update(next: ReadonlyMap<SelectionKey, ItemT>) {
++    this.selected = next;
++    this.listeners.forEach((listener) => listener());
++  }
++}
+diff --git a/src/components/table/selection/__tests__/SelectAllHeaderCell.node.test.tsx b/src/components/table/selection/__tests__/SelectAllHeaderCell.node.test.tsx
+new file mode 100644
+index 0000000..7c57785
+--- /dev/null
++++ b/src/components/table/selection/__tests__/SelectAllHeaderCell.node.test.tsx
+@@ -0,0 +1,165 @@
++import * as React from 'react';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
++import userEvent from '@testing-library/user-event';
++
++import { SocketContext } from '@/context/SocketContext';
++
++import { SelectAllHeaderCell, SelectableViewStore } from '../SelectAllHeaderCell';
++import { TableSelectionProvider } from '../TableSelectionContext';
++import { TableSelectionStore } from '../TableSelectionStore';
++
++interface Item {
++  id: number;
++  name: string;
++}
++
++const createRows = (count: number): Item[] =>
++  Array.from({ length: count }, (_, i) => ({ id: i + 1, name: `item${i + 1}` }));
++
++// Minimal stand-in for a Reflux view store
++const createViewStore = (
++  rowCount: number,
++): SelectableViewStore & { notify: () => void } => {
++  const listeners = new Set<() => void>();
++  const store = {
++    rowCount,
++    viewUrl: 'filelists/session1/filelist_view',
++    listen: (listener: () => void) => {
++      listeners.add(listener);
++      return () => listeners.delete(listener);
++    },
++    notify: () => listeners.forEach((l) => l()),
++  };
++  return store;
++};
++
++const createSocket = (rows: Item[]) => ({
++  get: vi.fn(async (url: string) => {
++    const [, , , , start, end] = url.split('/');
++    return rows.slice(Number(start), Number(end));
++  }),
++});
++
++const renderHeader = (
++  selection: TableSelectionStore<Item>,
++  viewStore: SelectableViewStore,
++  socket: ReturnType<typeof createSocket>,
++) =>
++  render(
++    <SocketContext value={socket as any}>
++      <TableSelectionProvider store={selection}>
++        <SelectAllHeaderCell viewStore={viewStore} />
++      </TableSelectionProvider>
++    </SocketContext>,
++  );
++
++afterEach(() => cleanup());
++
++describe('SelectAllHeaderCell', () => {
++  it('selects all rows of the view (also the ones that are not loaded)', async () => {
++    const rows = createRows(250);
++    const selection = new TableSelectionStore<Item>();
++    const socket = createSocket(rows);
++    renderHeader(selection, createViewStore(250), socket);
++
++    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
++    expect(checkbox.checked).toBe(false);
++
++    await userEvent.click(checkbox);
++    await waitFor(() => expect(selection.getItems()).toHaveLength(250));
++
++    // Fetched in chunks
++    expect(socket.get.mock.calls.map(([url]) => url)).toEqual([
++      'filelists/session1/filelist_view/items/0/100',
++      'filelists/session1/filelist_view/items/100/200',
++      'filelists/session1/filelist_view/items/200/250',
++    ]);
++    expect(selection.getItems()).toEqual(rows);
++    await waitFor(() => expect(checkbox.checked).toBe(true));
++  });
++
++  it('deselects everything when all rows are selected', async () => {
++    const rows = createRows(5);
++    const selection = new TableSelectionStore<Item>();
++    selection.setManySelected(rows);
++
++    const socket = createSocket(rows);
++    renderHeader(selection, createViewStore(5), socket);
++
++    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
++    expect(checkbox.checked).toBe(true);
++
++    await userEvent.click(checkbox);
++    expect(selection.getItems()).toEqual([]);
++    expect(socket.get).not.toHaveBeenCalled();
++    expect(checkbox.checked).toBe(false);
++  });
++
++  it('shows the indeterminate state for a partial selection and completes it on click', async () => {
++    const rows = createRows(5);
++    const selection = new TableSelectionStore<Item>();
++    selection.setSelected(rows[0], true);
++
++    renderHeader(selection, createViewStore(5), createSocket(rows));
++    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
++    expect(checkbox.checked).toBe(false);
++    expect(checkbox.indeterminate).toBe(true);
++
++    await userEvent.click(checkbox);
++    await waitFor(() => expect(selection.getItems()).toHaveLength(5));
++    expect(checkbox.indeterminate).toBe(false);
++  });
++
++  it('is disabled when the view is empty', () => {
++    const selection = new TableSelectionStore<Item>();
++    renderHeader(selection, createViewStore(0), createSocket([]));
++    expect((screen.getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
++  });
++
++  it('follows row count changes of the view', () => {
++    const rows = createRows(3);
++    const selection = new TableSelectionStore<Item>();
++    selection.setManySelected(rows);
++
++    const viewStore = createViewStore(3);
++    renderHeader(selection, viewStore, createSocket(rows));
++    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
++    expect(checkbox.checked).toBe(true);
++
++    // New items arrive
++    viewStore.rowCount = 4;
++    act(() => viewStore.notify());
++    expect(checkbox.checked).toBe(false);
++    expect(checkbox.indeterminate).toBe(true);
++  });
++
++  it('discards the result when the selection is cleared while fetching', async () => {
++    const rows = createRows(150);
++    const selection = new TableSelectionStore<Item>();
++
++    let release: () => void = () => {};
++    const gate = new Promise<void>((resolve) => (release = resolve));
++    const socket = {
++      get: vi.fn(async (url: string) => {
++        await gate;
++        const [, , , , start, end] = url.split('/');
++        return rows.slice(Number(start), Number(end));
++      }),
++    };
++
++    renderHeader(selection, createViewStore(150), socket as any);
++    await userEvent.click(screen.getByRole('checkbox'));
++    expect(socket.get).toHaveBeenCalledTimes(1);
++
++    // E.g. directory changed
++    act(() => selection.clear());
++    release();
++
++    await waitFor(() =>
++      expect((screen.getByRole('checkbox') as HTMLInputElement).disabled).toBe(false),
++    );
++    expect(selection.getItems()).toEqual([]);
++    expect(socket.get).toHaveBeenCalledTimes(1); // No further chunks were requested
++  });
++});
+diff --git a/src/components/table/selection/__tests__/TableSelection.node.test.tsx b/src/components/table/selection/__tests__/TableSelection.node.test.tsx
+new file mode 100644
+index 0000000..fa1917b
+--- /dev/null
++++ b/src/components/table/selection/__tests__/TableSelection.node.test.tsx
+@@ -0,0 +1,111 @@
++import * as React from 'react';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { act, cleanup, render, screen } from '@testing-library/react';
++import userEvent from '@testing-library/user-event';
++
++import { SelectCell } from '../SelectCell';
++import { SelectionBar } from '../SelectionBar';
++import { TableSelectionProvider } from '../TableSelectionContext';
++import { TableSelectionStore } from '../TableSelectionStore';
++
++interface Item {
++  id: number;
++  name: string;
++}
++
++const itemA: Item = { id: 1, name: 'first.txt' };
++const itemB: Item = { id: 2, name: 'second.txt' };
++
++const renderCell = (store: TableSelectionStore<Item>, item: Item) =>
++  render(
++    <TableSelectionProvider store={store}>
++      <SelectCell<Item> rowDataGetter={() => item} />
++    </TableSelectionProvider>,
++  );
++
++afterEach(() => cleanup());
++
++describe('SelectCell', () => {
++  it('selects and deselects the row when clicked', async () => {
++    const store = new TableSelectionStore<Item>();
++    renderCell(store, itemA);
++
++    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
++    expect(checkbox.checked).toBe(false);
++
++    await userEvent.click(checkbox);
++    expect(store.getItems()).toEqual([itemA]);
++    expect(checkbox.checked).toBe(true);
++
++    await userEvent.click(checkbox);
++    expect(store.getItems()).toEqual([]);
++    expect(checkbox.checked).toBe(false);
++  });
++
++  it('reflects selection changes made outside of the cell', () => {
++    const store = new TableSelectionStore<Item>();
++    renderCell(store, itemA);
++    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
++
++    act(() => store.setSelected(itemA, true));
++    expect(checkbox.checked).toBe(true);
++
++    act(() => store.clear());
++    expect(checkbox.checked).toBe(false);
++  });
++
++  it('follows the row when the cell is recycled for another item', () => {
++    const store = new TableSelectionStore<Item>();
++    store.setSelected(itemB, true);
++
++    const { rerender } = renderCell(store, itemA);
++    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
++    expect(checkbox.checked).toBe(false);
++
++    rerender(
++      <TableSelectionProvider store={store}>
++        <SelectCell<Item> rowDataGetter={() => itemB} />
++      </TableSelectionProvider>,
++    );
++    expect(checkbox.checked).toBe(true);
++  });
++});
++
++describe('SelectionBar', () => {
++  it('is hidden when nothing is selected', () => {
++    const store = new TableSelectionStore<Item>();
++    const { container } = render(
++      <TableSelectionProvider store={store}>
++        <SelectionBar onDownload={vi.fn()} />
++      </TableSelectionProvider>,
++    );
++
++    expect(container.querySelector('.table-selection-bar')).toBeNull();
++  });
++
++  it('shows the actions for selected items', async () => {
++    const store = new TableSelectionStore<Item>();
++    const onDownload = vi.fn();
++    const { container } = render(
++      <TableSelectionProvider store={store}>
++        <SelectionBar onDownload={onDownload} />
++      </TableSelectionProvider>,
++    );
++
++    act(() => {
++      store.setSelected(itemA, true);
++      store.setSelected(itemB, true);
++    });
++
++    expect(container.querySelector('.table-selection-bar')).not.toBeNull();
++    const buttons = screen.getAllByRole('button');
++    expect(buttons).toHaveLength(2);
++
++    await userEvent.click(buttons[0]);
++    expect(onDownload).toHaveBeenCalledTimes(1);
++
++    await userEvent.click(buttons[1]);
++    expect(store.getItems()).toEqual([]);
++    expect(container.querySelector('.table-selection-bar')).toBeNull();
++  });
++});
+diff --git a/src/components/table/selection/__tests__/TableSelectionStore.node.test.ts b/src/components/table/selection/__tests__/TableSelectionStore.node.test.ts
+new file mode 100644
+index 0000000..b284dc7
+--- /dev/null
++++ b/src/components/table/selection/__tests__/TableSelectionStore.node.test.ts
+@@ -0,0 +1,84 @@
++import { describe, expect, it, vi } from 'vitest';
++
++import { TableSelectionStore } from '../TableSelectionStore';
++
++interface Item {
++  id: number;
++  name: string;
++}
++
++const itemA: Item = { id: 1, name: 'a' };
++const itemB: Item = { id: 2, name: 'b' };
++
++describe('TableSelectionStore', () => {
++  it('selects and deselects items', () => {
++    const store = new TableSelectionStore<Item>();
++
++    store.setSelected(itemA, true);
++    store.setSelected(itemB, true);
++    expect(store.isSelected(1)).toBe(true);
++    expect(store.getItems()).toEqual([itemA, itemB]);
++
++    store.setSelected(itemA, false);
++    expect(store.isSelected(1)).toBe(false);
++    expect(store.getItems()).toEqual([itemB]);
++  });
++
++  it('notifies listeners only when the state changes', () => {
++    const store = new TableSelectionStore<Item>();
++    const listener = vi.fn();
++    const unsubscribe = store.subscribe(listener);
++
++    store.setSelected(itemA, true);
++    store.setSelected(itemA, true); // No change
++    store.setSelected(itemB, false); // No change
++    expect(listener).toHaveBeenCalledTimes(1);
++
++    store.clear();
++    store.clear(); // No change
++    expect(listener).toHaveBeenCalledTimes(2);
++
++    unsubscribe();
++    store.setSelected(itemA, true);
++    expect(listener).toHaveBeenCalledTimes(2);
++  });
++
++  it('creates a new snapshot for every change', () => {
++    const store = new TableSelectionStore<Item>();
++    const empty = store.getSnapshot();
++
++    store.setSelected(itemA, true);
++    const withA = store.getSnapshot();
++    expect(withA).not.toBe(empty);
++    expect(empty.size).toBe(0);
++    expect(store.getSnapshot()).toBe(withA);
++  });
++
++  it('adds many items with a single notification', () => {
++    const store = new TableSelectionStore<Item>();
++    store.setSelected(itemA, true);
++    const listener = vi.fn();
++    store.subscribe(listener);
++
++    store.setManySelected([itemA, itemB]);
++    expect(store.getItems()).toEqual([itemA, itemB]);
++    expect(listener).toHaveBeenCalledTimes(1);
++
++    store.setManySelected([itemA, itemB]); // No change
++    expect(listener).toHaveBeenCalledTimes(1);
++  });
++
++  it('increases the generation on every clear', () => {
++    const store = new TableSelectionStore<Item>();
++    const initial = store.getGeneration();
++
++    store.clear(); // Also when nothing is selected
++    expect(store.getGeneration()).toBe(initial + 1);
++
++    store.setSelected(itemA, true);
++    expect(store.getGeneration()).toBe(initial + 1);
++
++    store.clear();
++    expect(store.getGeneration()).toBe(initial + 2);
++  });
++});
+diff --git a/src/components/table/selection/index.ts b/src/components/table/selection/index.ts
+new file mode 100644
+index 0000000..3502d6c
+--- /dev/null
++++ b/src/components/table/selection/index.ts
+@@ -0,0 +1,5 @@
++export * from './TableSelectionStore';
++export * from './TableSelectionContext';
++export * from './SelectCell';
++export * from './SelectionBar';
++export * from './SelectAllHeaderCell';
+diff --git a/src/components/table/selection/style.css b/src/components/table/selection/style.css
+new file mode 100644
+index 0000000..9dc04b3
+--- /dev/null
++++ b/src/components/table/selection/style.css
+@@ -0,0 +1,34 @@
++.virtual-table .cell-wrapper .table-select-checkbox {
++  display: block;
++  width: 18px;
++  height: 18px;
++  margin: 0px 0px 0px 6px;
++  cursor: pointer;
++}
++
++.table-footer .table-selection-bar {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++
++.table-footer .table-selection-bar .selection-count {
++  font-weight: bold;
++  white-space: nowrap;
++}
++
++.table-footer .table-selection-bar .ui.button {
++  margin: 0px;
++}
++
++/* Select all checkbox in the table header.
++   The table's header <Cell> already centers its content vertically and adds 8px of padding,
++   unlike the row cells (cell-wrapper has 5px of padding + 6px margin = 11px from the cell edge).
++   The 3px margin makes the checkbox line up with the row checkboxes. */
++.table-select-all .table-select-checkbox {
++  display: block;
++  width: 18px;
++  height: 18px;
++  margin: 0px 0px 0px 3px;
++  cursor: pointer;
++}
+diff --git a/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx b/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
+index cd4deba..10efcae 100644
+--- a/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
++++ b/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
+@@ -29,6 +29,13 @@ import { FilelistItemActionMenu } from '@/actions/ui/filelist';
+ import { useSessionStore } from '@/context/SessionStoreContext';
+ import LinkButton from '@/components/semantic/LinkButton';
+ import { noMouseFocusProps } from '@/utils/BrowserUtils';
++import { useNavigate } from 'react-router';
++import {
++  SelectAllHeaderCell,
++  SelectCell,
++  SelectionBar,
++} from '@/components/table/selection';
++import { BULK_DOWNLOAD_ITEM_ID } from '../utils/bulkDownload';
+ 
+ interface NameCellProps extends RowWrapperCellChildProps<string, API.FilelistItem> {
+   filelist: API.FilelistSession;
+@@ -130,8 +137,10 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
+     return cellData;
+   };
+ 
+-  // const { session } = this.props;
+   const sessionStore = useSessionStore();
++  const navigate = useNavigate();
++  const handleBulkDownload = () => navigate(`download/${BULK_DOWNLOAD_ITEM_ID}`);
++
+   return (
+     <>
+       <VirtualTable
+@@ -145,7 +154,16 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
+         textFilterProps={{
+           autoFocus: true,
+         }}
++        footerData={<SelectionBar onDownload={handleBulkDownload} />}
+       >
++        <Column
++          name="Select"
++          width={40}
++          columnKey="select"
++          header={<SelectAllHeaderCell viewStore={FilelistViewStore} />}
++          cell={<SelectCell />}
++          flexGrow={0}
++        />
+         <Column
+           name="Name"
+           width={200}
+diff --git a/src/routes/Sidebar/routes/Filelists/components/ListBrowser.tsx b/src/routes/Sidebar/routes/Filelists/components/ListBrowser.tsx
+index 0bf5c35..2f70e2e 100644
+--- a/src/routes/Sidebar/routes/Filelists/components/ListBrowser.tsx
++++ b/src/routes/Sidebar/routes/Filelists/components/ListBrowser.tsx
+@@ -17,6 +17,17 @@ import { useSyncFilelistLocation } from '../effects/useSyncFilelistLocation';
+ import NotificationActions from '@/actions/NotificationActions';
+ import { FilelistItemActionMenu } from '@/actions/ui/filelist';
+ import { noMouseFocusProps } from '@/utils/BrowserUtils';
++import { useTranslation } from 'react-i18next';
++import { toI18nKey } from '@/utils/TranslationUtils';
++import {
++  TableSelectionProvider,
++  TableSelectionStore,
++} from '@/components/table/selection';
++import {
++  createBulkDownloadHandler,
++  createBulkDownloadItem,
++  isBulkDownloadRouteId,
++} from '../utils/bulkDownload';
+ 
+ interface ListBrowserProps {
+   filelist: API.FilelistSession;
+@@ -86,33 +97,70 @@ const ListBrowser: React.FC<ListBrowserProps> = (props) => {
+     return filelist.user;
+   };
+ 
+-  const filelistItemFetcher = FilelistItemGetter(filelist);
++  const { t } = useTranslation();
++
++  // Selection is tied to the currently displayed directory
++  const selectionStore = React.useMemo(
++    () => new TableSelectionStore<API.FilelistItem>(),
++    [],
++  );
++  const currentPath = filelist.location?.path;
++  React.useEffect(() => {
++    selectionStore.clear();
++  }, [filelist.id, currentPath, selectionStore]);
++
++  const bulkDownloadHandler = React.useMemo(
++    () => createBulkDownloadHandler(selectionStore, filelistDownloadHandler),
++    [selectionStore],
++  );
++
++  const filelistItemFetcher: UI.DownloadItemDataGetter<API.FilelistItem> = (
++    itemId,
++    socket,
++  ) => {
++    if (isBulkDownloadRouteId(itemId)) {
++      const items = selectionStore.getItems();
++      return Promise.resolve(
++        createBulkDownloadItem(
++          items,
++          t(toI18nKey('itemCount', UI.Modules.COMMON), {
++            defaultValue: '{{count}} items',
++            replace: { count: items.length },
++          }),
++        ),
++      );
++    }
++
++    return FilelistItemGetter(filelist)(itemId, socket);
++  };
+ 
+   return (
+-    <div className="browser">
+-      <BrowserBar
+-        path={filelist.location!.path}
+-        separator="/"
+-        rootPath="/"
+-        rootName={sessionT.translate('Root')}
+-        itemClickHandler={handleClickDirectory}
+-        selectedNameFormatter={selectedNameFormatter}
+-        // Just to make sure that the bar gets re-rendered when the switching to a different session (due to dropdown)
+-        entityId={filelist.id}
+-        sectionProps={noMouseFocusProps}
+-      />
+-      <FilelistItemTable
+-        filelist={filelist}
+-        sessionT={sessionT}
+-        onClickDirectory={handleClickDirectory}
+-      />
+-      <DownloadDialog
+-        downloadHandler={filelistDownloadHandler}
+-        itemDataGetter={filelistItemFetcher}
+-        userGetter={userGetter}
+-        sessionItem={filelist}
+-      />
+-    </div>
++    <TableSelectionProvider store={selectionStore}>
++      <div className="browser">
++        <BrowserBar
++          path={filelist.location!.path}
++          separator="/"
++          rootPath="/"
++          rootName={sessionT.translate('Root')}
++          itemClickHandler={handleClickDirectory}
++          selectedNameFormatter={selectedNameFormatter}
++          // Just to make sure that the bar gets re-rendered when the switching to a different session (due to dropdown)
++          entityId={filelist.id}
++          sectionProps={noMouseFocusProps}
++        />
++        <FilelistItemTable
++          filelist={filelist}
++          sessionT={sessionT}
++          onClickDirectory={handleClickDirectory}
++        />
++        <DownloadDialog
++          downloadHandler={bulkDownloadHandler}
++          itemDataGetter={filelistItemFetcher}
++          userGetter={userGetter}
++          sessionItem={filelist}
++        />
++      </div>
++    </TableSelectionProvider>
+   );
+ };
+ 
+diff --git a/src/routes/Sidebar/routes/Filelists/utils/__tests__/bulkDownload.node.test.ts b/src/routes/Sidebar/routes/Filelists/utils/__tests__/bulkDownload.node.test.ts
+new file mode 100644
+index 0000000..d067fa2
+--- /dev/null
++++ b/src/routes/Sidebar/routes/Filelists/utils/__tests__/bulkDownload.node.test.ts
+@@ -0,0 +1,130 @@
++import { describe, expect, it, vi } from 'vitest';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { TableSelectionStore } from '@/components/table/selection';
++
++import {
++  BULK_DOWNLOAD_ITEM_ID,
++  createBulkDownloadHandler,
++  createBulkDownloadItem,
++  isBulkDownloadPlaceholder,
++  isBulkDownloadRouteId,
++} from '../bulkDownload';
++
++const createItem = (
++  id: number,
++  name: string,
++  type: 'file' | 'directory',
++  size = 100,
++): API.FilelistItem => ({
++  id,
++  name,
++  path: `/${name}`,
++  tth: `tth${id}`,
++  dupe: null,
++  time: 0,
++  size,
++  complete: true,
++  type:
++    type === 'file'
++      ? { id: 'file', str: 'File', content_type: 'video' as API.FileContentType }
++      : { id: 'directory', str: 'Directory', files: 0, directories: 0 },
++});
++
++const file1 = createItem(1, 'one.mkv', 'file', 100);
++const file2 = createItem(2, 'two.mkv', 'file', 200);
++const dir = createItem(3, 'folder', 'directory', 300);
++
++const socket = {} as any;
++const entity = undefined;
++const downloadData = {
++  target_name: 'placeholder',
++  target_directory: '/downloads/',
++  priority: API.QueuePriorityEnum.DEFAULT,
++} as API.DownloadData;
++
++const bulkItemData = (items: API.FilelistItem[]) => ({
++  itemInfo: createBulkDownloadItem(items, `${items.length} items`),
++  user: undefined,
++  entity,
++});
++
++describe('bulk download item', () => {
++  it('detects the reserved route ID', () => {
++    expect(isBulkDownloadRouteId(BULK_DOWNLOAD_ITEM_ID)).toBe(true);
++    expect(isBulkDownloadRouteId(1)).toBe(false);
++    expect(isBulkDownloadRouteId('1')).toBe(false);
++  });
++
++  it('detects the placeholder item but not real items', () => {
++    expect(isBulkDownloadPlaceholder(createBulkDownloadItem([file1], '1 item'))).toBe(
++      true,
++    );
++    [file1, file2, dir].forEach((item) =>
++      expect(isBulkDownloadPlaceholder(item)).toBe(false),
++    );
++  });
++
++  it('summarizes the selected items', () => {
++    const item = createBulkDownloadItem([file1, file2, dir], '3 items');
++    expect(item.name).toBe('3 items');
++    expect(item.size).toBe(600);
++    expect(item.type).toMatchObject({ id: 'directory', files: 2, directories: 1 });
++  });
++});
++
++describe('bulk download handler', () => {
++  it('passes regular items through to the wrapped handler', async () => {
++    const selection = new TableSelectionStore<API.FilelistItem>();
++    const inner = vi.fn().mockResolvedValue(undefined);
++    const handler = createBulkDownloadHandler(selection, inner);
++
++    const itemData = { itemInfo: file1, user: undefined, entity };
++    await handler(itemData, downloadData, socket);
++
++    expect(inner).toHaveBeenCalledTimes(1);
++    expect(inner).toHaveBeenCalledWith(itemData, downloadData, socket);
++  });
++
++  it('queues every selected item with its own name and clears the selection', async () => {
++    const selection = new TableSelectionStore<API.FilelistItem>();
++    [file1, file2, dir].forEach((item) => selection.setSelected(item, true));
++
++    const inner = vi.fn().mockResolvedValue(undefined);
++    const handler = createBulkDownloadHandler(selection, inner);
++
++    await handler(bulkItemData(selection.getItems()), downloadData, socket);
++
++    expect(inner).toHaveBeenCalledTimes(3);
++    expect(inner.mock.calls.map(([data]) => data.itemInfo)).toEqual([file1, file2, dir]);
++    expect(inner.mock.calls.map(([, dlData]) => dlData.target_name)).toEqual([
++      'one.mkv',
++      'two.mkv',
++      'folder',
++    ]);
++    inner.mock.calls.forEach(([, dlData]) =>
++      expect(dlData.target_directory).toBe('/downloads/'),
++    );
++    expect(selection.getItems()).toEqual([]);
++  });
++
++  it('keeps failed items selected and reports them', async () => {
++    const selection = new TableSelectionStore<API.FilelistItem>();
++    [file1, file2, dir].forEach((item) => selection.setSelected(item, true));
++
++    const inner: UI.DownloadHandler<API.FilelistItem> = vi.fn(async ({ itemInfo }) => {
++      if (itemInfo.id === file2.id) {
++        throw new Error('queue full');
++      }
++    });
++    const handler = createBulkDownloadHandler(selection, inner);
++
++    await expect(
++      handler(bulkItemData(selection.getItems()), downloadData, socket),
++    ).rejects.toThrow('Failed to queue 1/3 items (two.mkv): queue full');
++
++    expect(selection.getItems()).toEqual([file2]);
++    expect(inner).toHaveBeenCalledTimes(3);
++  });
++});
+diff --git a/src/routes/Sidebar/routes/Filelists/utils/bulkDownload.ts b/src/routes/Sidebar/routes/Filelists/utils/bulkDownload.ts
+new file mode 100644
+index 0000000..b7c822b
+--- /dev/null
++++ b/src/routes/Sidebar/routes/Filelists/utils/bulkDownload.ts
+@@ -0,0 +1,78 @@
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++
++import { TableSelectionStore } from '@/components/table/selection';
++
++// The existing download dialog is opened with an item ID in the route (download/:id).
++// For bulk downloads, this reserved ID is used instead of a real item ID.
++export const BULK_DOWNLOAD_ITEM_ID = 'bulk';
++
++export const isBulkDownloadRouteId = (itemId: API.IdType) =>
++  String(itemId) === BULK_DOWNLOAD_ITEM_ID;
++
++// The dialog receives the placeholder item (not the route ID) from the item getter.
++// Real filelist paths always start with a slash so this can't match a real item.
++const BULK_PLACEHOLDER_PATH = '<bulk>';
++
++export const isBulkDownloadPlaceholder = (item: API.FilelistItem) =>
++  item.path === BULK_PLACEHOLDER_PATH;
++
++// Placeholder item for the download dialog (it's used only for displaying the dialog)
++export const createBulkDownloadItem = (
++  items: API.FilelistItem[],
++  name: string,
++): API.FilelistItem => ({
++  id: -1,
++  name,
++  path: BULK_PLACEHOLDER_PATH,
++  tth: '',
++  dupe: null,
++  time: 0,
++  complete: true,
++  size: items.reduce((total, item) => total + item.size, 0),
++  type: {
++    id: 'directory',
++    str: 'Directory',
++    files: items.filter((item) => item.type.id === 'file').length,
++    directories: items.filter((item) => item.type.id === 'directory').length,
++  },
++});
++
++// Wraps the regular download handler so that the placeholder item queues all selected items
++// to the chosen target directory. Items that were queued successfully are removed
++// from the selection, so that a failed download can be retried without duplicates.
++export const createBulkDownloadHandler = (
++  selection: TableSelectionStore<API.FilelistItem>,
++  downloadHandler: UI.DownloadHandler<API.FilelistItem>,
++): UI.DownloadHandler<API.FilelistItem> => {
++  return async (itemData, downloadData, socket) => {
++    if (!isBulkDownloadPlaceholder(itemData.itemInfo)) {
++      return downloadHandler(itemData, downloadData, socket);
++    }
++
++    const items = selection.getItems();
++    const failures: { item: API.FilelistItem; error: Error }[] = [];
++
++    for (const item of items) {
++      try {
++        await downloadHandler(
++          { ...itemData, itemInfo: item },
++          // Each item needs its own name (the shared name belongs to the placeholder)
++          { ...downloadData, target_name: item.name },
++          socket,
++        );
++
++        selection.setSelected(item, false);
++      } catch (e) {
++        failures.push({ item, error: e as Error });
++      }
++    }
++
++    if (failures.length > 0) {
++      const names = failures.map(({ item }) => item.name).join(', ');
++      throw new Error(
++        `Failed to queue ${failures.length}/${items.length} items (${names}): ${failures[0].error.message}`,
++      );
++    }
++  };
++};
