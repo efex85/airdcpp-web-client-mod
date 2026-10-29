@@ -46,11 +46,6 @@ RUN installDeps=' \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends ${installDeps} ${runtimeDeps} \
 # Install node.js to enable airdcpp extension support.
-# Pinned to the 18.x line before, which reached end-of-life in April 2025 —
-# no more security backports land on it at all, which is why it was sitting
-# on an old, unpatched build (including a 9.8-severity CVE). 24.x is a
-# currently-maintained line, and its newer bundled npm also carries patched
-# versions of tar/minimatch/http-cache-semantics.
     && curl -sL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
 # Download and install airdcpp
