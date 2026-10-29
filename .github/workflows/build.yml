@@ -1,0 +1,162 @@
+name: Create Docker image on new release
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'Which channel to force-build'
+        type: choice
+        options:
+          - both
+          - stable
+          - develop
+        default: both
+      force_build:
+        description: 'Force rebuild even if tag already exists'
+        type: boolean
+        default: false
+      suffix:
+        description: 'Optional suffix to append to the version tag (e.g. hotfix1). Leave empty for a normal build.'
+        type: string
+        default: ''
+  schedule:
+    - cron: '0 6,12,18,0 * * *'
+
+jobs:
+  buildDockerImage:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Get latest airdcpp releases
+        run: |
+          echo "stable_tag=$(curl -fsL https://web-builds.airdcpp.net/stable/ | grep "_64-bit_portable.tar.gz" | grep -v latest | sort -t "_" -k1.14rV | head -n1 | cut -d "_" -f 2)" >> $GITHUB_ENV
+          echo "stable_dl_url=https://web-builds.airdcpp.net/stable/$(curl -fsL https://web-builds.airdcpp.net/stable/ | grep "_64-bit_portable.tar.gz" | grep -v latest | sort -t "_" -k2.1V | tail -n1 | sed -nr 's/.*href="([^"]+)".*/\1/p')" >> $GITHUB_ENV
+          echo "dev_tag=$(curl -fsL https://web-builds.airdcpp.net/develop/ | grep "_64-bit_portable.tar.gz" | grep -v latest | sort -t "_" -k1.14rV | head -n1 | cut -d "_" -f 2)" >> $GITHUB_ENV
+          echo "dev_dl_url=https://web-builds.airdcpp.net/develop/$(curl -fsL https://web-builds.airdcpp.net/develop/ | grep "_64-bit_portable.tar.gz" | grep -v latest | sort -t '>' -k 3.9,3.12 -k 3.5,3.7M -k 3.2,3.3n | tail -n1 | sed -nr 's/.*href="([^"]+)".*/\1/p')" >> $GITHUB_ENV
+
+      - name: Apply optional suffix to tags
+        run: |
+          SUFFIX="${{ github.event.inputs.suffix }}"
+          if [ -n "$SUFFIX" ]; then
+            echo "stable_full_tag=${{ env.stable_tag }}-${SUFFIX}" >> $GITHUB_ENV
+            echo "dev_full_tag=${{ env.dev_tag }}-${SUFFIX}" >> $GITHUB_ENV
+          else
+            echo "stable_full_tag=${{ env.stable_tag }}" >> $GITHUB_ENV
+            echo "dev_full_tag=${{ env.dev_tag }}" >> $GITHUB_ENV
+          fi
+
+      - name: Does the release exist as docker image
+        run: |
+          echo "num_rels_found=$(curl -fsL 'https://hub.docker.com/v2/repositories/rafsis/airdcpp-webclient-mod/tags/?page_size=50&ordering=last_updated' | jq -r '.results[].name' | grep -c '^${{env.stable_full_tag}}$')" >> $GITHUB_ENV
+          echo "num_dev_rels_found=$(curl -fsL 'https://hub.docker.com/v2/repositories/rafsis/airdcpp-webclient-mod/tags/?page_size=50&ordering=last_updated' | jq -r '.results[].name' | grep -c '^${{env.dev_full_tag}}$')" >> $GITHUB_ENV
+
+      - name: Determine which is newest
+        run: |
+          # Compare version strings lexicographically
+          if [[ "${{ env.dev_tag }}" > "${{ env.stable_tag }}" ]]; then
+            echo "newest=develop" >> $GITHUB_ENV
+          else
+            echo "newest=stable" >> $GITHUB_ENV
+          fi
+
+      - name: Determine build targets
+        run: |
+          event="${{ github.event_name }}"
+          target="${{ github.event.inputs.build_target }}"
+          force="${{ github.event.inputs.force_build }}"
+          suffix="${{ github.event.inputs.suffix }}"
+
+          do_stable=false
+          do_develop=false
+
+          if [[ "$event" == "schedule" ]]; then
+            # Scheduled runs: auto-detect only. There's no build_target or
+            # suffix on a schedule trigger, so just build whichever
+            # channel(s) have a version that isn't published as a tag yet.
+            if [[ "${{ env.num_rels_found }}" == "0" ]]; then
+              do_stable=true
+            fi
+            if [[ "${{ env.num_dev_rels_found }}" == "0" ]]; then
+              do_develop=true
+            fi
+          else
+            # Manual dispatch: respect build_target strictly, so picking
+            # "develop" never also triggers a stable build (this is what
+            # broke before — the old unconditional auto-detect block below
+            # would set do_stable=true just because the *stable* tag with
+            # your suffix didn't exist yet, regardless of what you picked).
+            if [[ "$target" == "stable" || "$target" == "both" ]]; then
+              if [[ "${{ env.num_rels_found }}" == "0" || "$force" == "true" || -n "$suffix" ]]; then
+                do_stable=true
+              fi
+            fi
+            if [[ "$target" == "develop" || "$target" == "both" ]]; then
+              if [[ "${{ env.num_dev_rels_found }}" == "0" || "$force" == "true" || -n "$suffix" ]]; then
+                do_develop=true
+              fi
+            fi
+          fi
+
+          echo "do_stable=$do_stable" >> $GITHUB_ENV
+          echo "do_develop=$do_develop" >> $GITHUB_ENV
+
+      - name: Details
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Stable Version: ${{env.stable_tag}} Full tag: ${{env.stable_full_tag}} Existing tags: ${{env.num_rels_found}} DlUrl: ${{env.stable_dl_url}} WillBuild: ${{env.do_stable}}"
+          echo "Develop Version: ${{env.dev_tag}} Full tag: ${{env.dev_full_tag}} Existing tags: ${{env.num_dev_rels_found}} DlUrl: ${{env.dev_dl_url}} WillBuild: ${{env.do_develop}}"
+          echo "Newest: ${{env.newest}}"
+          echo "Suffix: ${{ github.event.inputs.suffix }}"
+
+      - if: ${{ env.do_stable == 'true' || env.do_develop == 'true' }}
+        name: Checkout
+        uses: actions/checkout@v3
+
+      - if: ${{ env.do_stable == 'true' || env.do_develop == 'true' }}
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - if: ${{ env.do_stable == 'true' || env.do_develop == 'true' }}
+        name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # -------------------------
+      # Build STABLE
+      # -------------------------
+      - if: ${{ env.do_stable == 'true' }}
+        name: Build and push stable
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          build-args: |
+            dl_url=${{env.stable_dl_url}}
+          no-cache: true
+          push: true
+          tags: |
+            rafsis/airdcpp-webclient-mod:stable
+            rafsis/airdcpp-webclient-mod:${{ env.stable_full_tag }}
+            ${{ env.newest == 'stable' && 'rafsis/airdcpp-webclient-mod:latest' || '' }}
+
+      # -------------------------
+      # Build DEVELOP
+      # -------------------------
+      # Skip only when develop and stable currently share the same version
+      # AND this isn't a deliberate suffixed build. A suffix always means
+      # "build this exact channel now", even if its content would currently
+      # match stable's, so a coincidental version match can't silently drop
+      # a manually-requested develop build.
+      - if: ${{ env.do_develop == 'true' && (env.dev_tag != env.stable_tag || github.event.inputs.suffix != '') }}
+        name: Build and push develop
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          build-args: |
+            dl_url=${{env.dev_dl_url}}
+          no-cache: true
+          push: true
+          tags: |
+            rafsis/airdcpp-webclient-mod:develop
+            rafsis/airdcpp-webclient-mod:${{ env.dev_full_tag }}
+            ${{ env.newest == 'develop' && 'rafsis/airdcpp-webclient-mod:latest' || '' }}
