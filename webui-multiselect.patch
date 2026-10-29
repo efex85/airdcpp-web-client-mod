@@ -1,3 +1,147 @@
+diff --git a/src/actions/ui/download-selection/DownloadSelectionActions.ts b/src/actions/ui/download-selection/DownloadSelectionActions.ts
+new file mode 100644
+index 0000000..0fb3ccf
+--- /dev/null
++++ b/src/actions/ui/download-selection/DownloadSelectionActions.ts
+@@ -0,0 +1,52 @@
++import IconConstants from '@/constants/IconConstants';
++
++import * as UI from '@/types/ui';
++
++// Actions for downloading the items selected in a table (search results, filelist items)
++
++export interface DownloadSelectionData {
++  // Required for menu item data
++  id: string;
++
++  // Description of the selection (e.g. "3 results")
++  name: string;
++
++  // Download to the default directory
++  download: () => Promise<unknown>;
++
++  // Open the download dialog for choosing the directory
++  downloadTo: () => void;
++}
++
++type Handler = UI.ActionHandler<DownloadSelectionData>;
++
++const handleDownload: Handler = ({ itemData }) => itemData.download();
++
++const handleDownloadTo: Handler = ({ itemData }) => {
++  itemData.downloadTo();
++};
++
++export const DownloadSelectionDownloadAction = {
++  id: 'downloadSelected',
++  displayName: 'Download selected',
++  icon: IconConstants.DOWNLOAD,
++  handler: handleDownload,
++};
++
++export const DownloadSelectionDownloadToAction = {
++  id: 'downloadSelectedTo',
++  displayName: 'Download selected to...',
++  icon: IconConstants.FOLDER,
++  handler: handleDownloadTo,
++};
++
++const DownloadSelectionActions: UI.ActionListType<DownloadSelectionData> = {
++  download: DownloadSelectionDownloadAction,
++  downloadTo: DownloadSelectionDownloadToAction,
++};
++
++export const createDownloadSelectionActionMenu = (moduleId: UI.Modules) =>
++  ({
++    moduleData: { moduleId, subId: 'selection' },
++    actions: DownloadSelectionActions,
++  }) as UI.ModuleActions<DownloadSelectionData>;
+diff --git a/src/actions/ui/download-selection/__tests__/DownloadSelectionActions.node.test.ts b/src/actions/ui/download-selection/__tests__/DownloadSelectionActions.node.test.ts
+new file mode 100644
+index 0000000..9df7a96
+--- /dev/null
++++ b/src/actions/ui/download-selection/__tests__/DownloadSelectionActions.node.test.ts
+@@ -0,0 +1,45 @@
++import { describe, expect, it, vi } from 'vitest';
++
++import {
++  DownloadSelectionData,
++  DownloadSelectionDownloadAction,
++  DownloadSelectionDownloadToAction,
++} from '../DownloadSelectionActions';
++
++const createData = (): DownloadSelectionData => ({
++  id: 'selection',
++  name: '2 results',
++  download: vi.fn(async () => undefined),
++  downloadTo: vi.fn(),
++});
++
++const run = (
++  action: typeof DownloadSelectionDownloadAction,
++  itemData: DownloadSelectionData,
++) =>
++  action.handler({
++    itemData,
++    entity: undefined,
++    socket: {},
++  } as unknown as Parameters<typeof action.handler>[0]);
++
++describe('DownloadSelectionActions', () => {
++  it('downloads the selection to the default directory', async () => {
++    const data = createData();
++    await run(DownloadSelectionDownloadAction, data);
++
++    expect(data.download).toHaveBeenCalledTimes(1);
++    expect(data.downloadTo).not.toHaveBeenCalled();
++  });
++
++  it('opens the directory selection', async () => {
++    const data = createData();
++    await run(
++      DownloadSelectionDownloadToAction as typeof DownloadSelectionDownloadAction,
++      data,
++    );
++
++    expect(data.downloadTo).toHaveBeenCalledTimes(1);
++    expect(data.download).not.toHaveBeenCalled();
++  });
++});
+diff --git a/src/actions/ui/download-selection/index.ts b/src/actions/ui/download-selection/index.ts
+new file mode 100644
+index 0000000..63bddc4
+--- /dev/null
++++ b/src/actions/ui/download-selection/index.ts
+@@ -0,0 +1 @@
++export * from './DownloadSelectionActions';
+diff --git a/src/actions/ui/filelist/FilelistSelectionActions.ts b/src/actions/ui/filelist/FilelistSelectionActions.ts
+new file mode 100644
+index 0000000..9fe913f
+--- /dev/null
++++ b/src/actions/ui/filelist/FilelistSelectionActions.ts
+@@ -0,0 +1,14 @@
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { createDownloadSelectionActionMenu } from '@/actions/ui/download-selection';
++
++// Menu for the footer of the filelist table. Only the actions for
++// the selected items are available (no actions for the table itself).
++export const FilelistTableActionMenu = {
++  moduleData: { moduleId: UI.Modules.FILELISTS },
++  actions: {},
++} as UI.ModuleActions<API.FilelistSession>;
++
++export const FilelistSelectionActionMenu = createDownloadSelectionActionMenu(
++  UI.Modules.FILELISTS,
++);
+diff --git a/src/actions/ui/filelist/index.ts b/src/actions/ui/filelist/index.ts
+index 046ed6a..0d052a0 100644
+--- a/src/actions/ui/filelist/index.ts
++++ b/src/actions/ui/filelist/index.ts
+@@ -1,2 +1,3 @@
+ export * from './FilelistItemActions';
+ export * from './FilelistSessionActions';
++export * from './FilelistSelectionActions';
 diff --git a/src/actions/ui/queue/QueueBundleSelectionActions.ts b/src/actions/ui/queue/QueueBundleSelectionActions.ts
 new file mode 100644
 index 0000000..df36af4
@@ -364,127 +508,23 @@ index fa3b6a1..95b1630 100644
  export * from './QueueFileActions';
  export * from './QueueSourceActions';
 +export * from './QueueBundleSelectionActions';
-diff --git a/src/actions/ui/search/SearchSelectionActions.ts b/src/actions/ui/search/SearchSelectionActions.ts
-new file mode 100644
-index 0000000..4902efa
---- /dev/null
-+++ b/src/actions/ui/search/SearchSelectionActions.ts
-@@ -0,0 +1,56 @@
-+import IconConstants from '@/constants/IconConstants';
+diff --git a/src/actions/ui/search/SearchActions.ts b/src/actions/ui/search/SearchActions.ts
+index 3e859a9..819ec34 100644
+--- a/src/actions/ui/search/SearchActions.ts
++++ b/src/actions/ui/search/SearchActions.ts
+@@ -1,3 +1,4 @@
++import { createDownloadSelectionActionMenu } from '@/actions/ui/download-selection';
+ import { FilelistAPIActions } from '@/actions/store/FilelistActions';
+ import IconConstants from '@/constants/IconConstants';
+ 
+@@ -56,3 +57,7 @@ export const SearchActionMenu = {
+   moduleData: SearchActionModule,
+   actions: SearchActions,
+ };
 +
-+import * as UI from '@/types/ui';
-+
-+// Actions for the search results selected in the result table
-+
-+export interface SearchSelectionData {
-+  // Required for menu item data
-+  id: string;
-+
-+  // Description of the selection (e.g. "3 results")
-+  name: string;
-+
-+  // Download to the default directory
-+  download: () => Promise<unknown>;
-+
-+  // Open the download dialog for choosing the directory
-+  downloadTo: () => void;
-+}
-+
-+type Handler = UI.ActionHandler<SearchSelectionData>;
-+
-+const handleDownload: Handler = ({ itemData }) => itemData.download();
-+
-+const handleDownloadTo: Handler = ({ itemData }) => {
-+  itemData.downloadTo();
-+};
-+
-+export const SearchSelectionDownloadAction = {
-+  id: 'downloadSelected',
-+  displayName: 'Download selected',
-+  icon: IconConstants.DOWNLOAD,
-+  handler: handleDownload,
-+};
-+
-+export const SearchSelectionDownloadToAction = {
-+  id: 'downloadSelectedTo',
-+  displayName: 'Download selected to...',
-+  icon: IconConstants.FOLDER,
-+  handler: handleDownloadTo,
-+};
-+
-+const SearchSelectionActions: UI.ActionListType<SearchSelectionData> = {
-+  download: SearchSelectionDownloadAction,
-+  downloadTo: SearchSelectionDownloadToAction,
-+};
-+
-+export const SearchSelectionActionModule = {
-+  moduleId: UI.Modules.SEARCH,
-+  subId: 'selection',
-+};
-+
-+export const SearchSelectionActionMenu = {
-+  moduleData: SearchSelectionActionModule,
-+  actions: SearchSelectionActions,
-+} as UI.ModuleActions<SearchSelectionData>;
-diff --git a/src/actions/ui/search/__tests__/SearchSelectionActions.node.test.ts b/src/actions/ui/search/__tests__/SearchSelectionActions.node.test.ts
-new file mode 100644
-index 0000000..42a8578
---- /dev/null
-+++ b/src/actions/ui/search/__tests__/SearchSelectionActions.node.test.ts
-@@ -0,0 +1,45 @@
-+import { describe, expect, it, vi } from 'vitest';
-+
-+import {
-+  SearchSelectionData,
-+  SearchSelectionDownloadAction,
-+  SearchSelectionDownloadToAction,
-+} from '../SearchSelectionActions';
-+
-+const createData = (): SearchSelectionData => ({
-+  id: 'selection',
-+  name: '2 results',
-+  download: vi.fn(async () => undefined),
-+  downloadTo: vi.fn(),
-+});
-+
-+const run = (
-+  action: typeof SearchSelectionDownloadAction,
-+  itemData: SearchSelectionData,
-+) =>
-+  action.handler({
-+    itemData,
-+    entity: undefined,
-+    socket: {},
-+  } as unknown as Parameters<typeof action.handler>[0]);
-+
-+describe('SearchSelectionActions', () => {
-+  it('downloads the selection to the default directory', async () => {
-+    const data = createData();
-+    await run(SearchSelectionDownloadAction, data);
-+
-+    expect(data.download).toHaveBeenCalledTimes(1);
-+    expect(data.downloadTo).not.toHaveBeenCalled();
-+  });
-+
-+  it('opens the directory selection', async () => {
-+    const data = createData();
-+    await run(
-+      SearchSelectionDownloadToAction as typeof SearchSelectionDownloadAction,
-+      data,
-+    );
-+
-+    expect(data.downloadTo).toHaveBeenCalledTimes(1);
-+    expect(data.download).not.toHaveBeenCalled();
-+  });
-+});
-diff --git a/src/actions/ui/search/index.ts b/src/actions/ui/search/index.ts
-index 9e9bc76..82266e1 100644
---- a/src/actions/ui/search/index.ts
-+++ b/src/actions/ui/search/index.ts
-@@ -1,2 +1,3 @@
- export * from './SearchActions';
- export * from './SearchTypeActions';
-+export * from './SearchSelectionActions';
++export const SearchSelectionActionMenu = createDownloadSelectionActionMenu(
++  UI.Modules.SEARCH,
++);
 diff --git a/src/components/download/bulk/BulkDownload.ts b/src/components/download/bulk/BulkDownload.ts
 new file mode 100644
 index 0000000..0b0a66b
@@ -1164,10 +1204,10 @@ index 0000000..14d286b
 +};
 diff --git a/src/components/table/selection/SelectionBar.tsx b/src/components/table/selection/SelectionBar.tsx
 new file mode 100644
-index 0000000..7303111
+index 0000000..8585a22
 --- /dev/null
 +++ b/src/components/table/selection/SelectionBar.tsx
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,47 @@
 +import * as React from 'react';
 +import { useTranslation } from 'react-i18next';
 +
@@ -1183,22 +1223,12 @@ index 0000000..7303111
 +import './style.css';
 +
 +export interface SelectionBarProps {
-+  // Displays a download button (downloads to the default directory) when set
-+  onDownload?: () => void;
-+
-+  // Displays a button for choosing the download directory when set
-+  onDownloadTo?: () => void;
-+
-+  // Additional actions (displayed after the download button)
++  // Additional actions
 +  children?: React.ReactNode;
 +}
 +
 +// Table footer content that is displayed when there are selected rows
-+export const SelectionBar: React.FC<SelectionBarProps> = ({
-+  onDownload,
-+  onDownloadTo,
-+  children,
-+}) => {
++export const SelectionBar: React.FC<SelectionBarProps> = ({ children }) => {
 +  const { t } = useTranslation();
 +  const store = useTableSelectionStore<TableSelectionItem>();
 +  const selected = useSelectedItems();
@@ -1215,22 +1245,6 @@ index 0000000..7303111
 +          replace: { count: selected.length },
 +        })}
 +      </span>
-+      {!!onDownload && (
-+        <Button
-+          className="tiny"
-+          icon={IconConstants.DOWNLOAD}
-+          caption={translate('Download', t, UI.Modules.COMMON)}
-+          onClick={onDownload}
-+        />
-+      )}
-+      {!!onDownloadTo && (
-+        <Button
-+          className="tiny"
-+          icon={IconConstants.FOLDER}
-+          caption={translate('Download to...', t, UI.Modules.COMMON)}
-+          onClick={onDownloadTo}
-+        />
-+      )}
 +      {children}
 +      <Button
 +        className="tiny basic"
@@ -1543,12 +1557,12 @@ index 0000000..7c57785
 +});
 diff --git a/src/components/table/selection/__tests__/TableSelection.node.test.tsx b/src/components/table/selection/__tests__/TableSelection.node.test.tsx
 new file mode 100644
-index 0000000..8bbfd0a
+index 0000000..bb52303
 --- /dev/null
 +++ b/src/components/table/selection/__tests__/TableSelection.node.test.tsx
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,128 @@
 +import * as React from 'react';
-+import { afterEach, describe, expect, it, vi } from 'vitest';
++import { afterEach, describe, expect, it } from 'vitest';
 +import { act, cleanup, render, screen } from '@testing-library/react';
 +import userEvent from '@testing-library/user-event';
 +
@@ -1625,20 +1639,18 @@ index 0000000..8bbfd0a
 +    const store = new TableSelectionStore<Item>();
 +    const { container } = render(
 +      <TableSelectionProvider store={store}>
-+        <SelectionBar onDownload={vi.fn()} />
++        <SelectionBar />
 +      </TableSelectionProvider>,
 +    );
 +
 +    expect(container.querySelector('.table-selection-bar')).toBeNull();
 +  });
 +
-+  it('shows the actions for selected items', async () => {
++  it('shows the selection count and clears the selection', async () => {
 +    const store = new TableSelectionStore<Item>();
-+    const onDownload = vi.fn();
-+    const onDownloadTo = vi.fn();
 +    const { container } = render(
 +      <TableSelectionProvider store={store}>
-+        <SelectionBar onDownload={onDownload} onDownloadTo={onDownloadTo} />
++        <SelectionBar />
 +      </TableSelectionProvider>,
 +    );
 +
@@ -1648,27 +1660,18 @@ index 0000000..8bbfd0a
 +    });
 +
 +    expect(container.querySelector('.table-selection-bar')).not.toBeNull();
++    expect(container.querySelector('.selection-count')).not.toBeNull();
++
 +    const buttons = screen.getAllByRole('button');
-+    expect(buttons).toHaveLength(3);
-+    expect(buttons.map((button) => button.textContent)).toEqual([
-+      'Download',
-+      'Download to...',
-+      'Clear selection',
-+    ]);
++    expect(buttons).toHaveLength(1);
++    expect(buttons[0].textContent).toBe('Clear selection');
 +
 +    await userEvent.click(buttons[0]);
-+    expect(onDownload).toHaveBeenCalledTimes(1);
-+    expect(onDownloadTo).not.toHaveBeenCalled();
-+
-+    await userEvent.click(buttons[1]);
-+    expect(onDownloadTo).toHaveBeenCalledTimes(1);
-+
-+    await userEvent.click(buttons[2]);
 +    expect(store.getItems()).toEqual([]);
 +    expect(container.querySelector('.table-selection-bar')).toBeNull();
 +  });
 +
-+  it('renders additional actions and omits the download button when not requested', () => {
++  it('renders additional actions', () => {
 +    const store = new TableSelectionStore<Item>();
 +    store.setSelected(itemA, true);
 +
@@ -1680,7 +1683,7 @@ index 0000000..8bbfd0a
 +      </TableSelectionProvider>,
 +    );
 +
-+    // Extra action + clear selection (no download button)
++    // Extra action + clear selection
 +    const buttons = screen.getAllByRole('button');
 +    expect(buttons).toHaveLength(2);
 +    expect(buttons[0].textContent).toBe('Extra action');
@@ -2619,21 +2622,18 @@ index 7a4c587..4a3c8a6 100644
  export default ResultTable;
 diff --git a/src/routes/Search/components/SearchActionsMenu.tsx b/src/routes/Search/components/SearchActionsMenu.tsx
 new file mode 100644
-index 0000000..f082187
+index 0000000..3f33ef4
 --- /dev/null
 +++ b/src/routes/Search/components/SearchActionsMenu.tsx
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,62 @@
 +import * as React from 'react';
 +import { useTranslation } from 'react-i18next';
 +
 +import { ActionMenu } from '@/components/action-menu';
 +import { useSelectedItems } from '@/components/table/selection';
 +
-+import {
-+  SearchActionMenu,
-+  SearchSelectionActionMenu,
-+  SearchSelectionData,
-+} from '@/actions/ui/search';
++import { SearchActionMenu, SearchSelectionActionMenu } from '@/actions/ui/search';
++import type { DownloadSelectionData } from '@/actions/ui/download-selection';
 +
 +import MenuConstants from '@/constants/MenuConstants';
 +
@@ -2659,7 +2659,7 @@ index 0000000..f082187
 +  const { t } = useTranslation();
 +  const results = useSelectedItems<API.GroupedSearchResult>();
 +
-+  const selectionItemData: SearchSelectionData = {
++  const selectionItemData: DownloadSelectionData = {
 +    id: 'selection',
 +    name: t(toI18nKey('xResults', UI.Modules.SEARCH), {
 +      defaultValue_one: '{{count}} result',
@@ -2689,7 +2689,7 @@ index 0000000..f082187
 +  );
 +};
 diff --git a/src/routes/Sidebar/routes/Filelists/__tests__/Filelists.browser.test.tsx b/src/routes/Sidebar/routes/Filelists/__tests__/Filelists.browser.test.tsx
-index dc37054..05919ef 100644
+index dc37054..dce5af5 100644
 --- a/src/routes/Sidebar/routes/Filelists/__tests__/Filelists.browser.test.tsx
 +++ b/src/routes/Sidebar/routes/Filelists/__tests__/Filelists.browser.test.tsx
 @@ -42,6 +42,7 @@ import QueueConstants from '@/constants/QueueConstants';
@@ -2700,7 +2700,7 @@ index dc37054..05919ef 100644
    waitExpectRequestToMatchSnapshot,
    waitForUrl,
  } from '@/tests/helpers/test-helpers';
-@@ -382,6 +383,69 @@ describe('Filelists', () => {
+@@ -382,6 +383,71 @@ describe('Filelists', () => {
        await navigateToUrl('/', router);
        await filelist1Mocks.table.waitStopped();
      });
@@ -2729,7 +2729,8 @@ index dc37054..05919ef 100644
 +      await waitFor(() => expect(getByText('1 selected')).toBeTruthy());
 +
 +      // Queued right away without the dialog
-+      await renderResult.userEvent.click(getByRole('button', { name: 'Download' }));
++      await openMenu('Actions...', renderResult);
++      await clickMenuItem('Download selected', renderResult);
 +      await waitFor(() => expect(onDownloadFile).toHaveBeenCalledTimes(1));
 +
 +      const { data } = parseMockRequest(onDownloadFile.mock.calls[0][0]);
@@ -2759,7 +2760,8 @@ index dc37054..05919ef 100644
 +      );
 +      await waitFor(() => expect(getByText('1 selected')).toBeTruthy());
 +
-+      await renderResult.userEvent.click(getByRole('button', { name: 'Download to...' }));
++      await openMenu('Actions...', renderResult);
++      await clickMenuItem('Download selected to...', renderResult);
 +      await waitFor(() =>
 +        expect(router.state.location.pathname).toMatch(/download\/bulk$/),
 +      );
@@ -2770,11 +2772,83 @@ index dc37054..05919ef 100644
    });
  
    describe('new session', () => {
+diff --git a/src/routes/Sidebar/routes/Filelists/components/FilelistActionsMenu.tsx b/src/routes/Sidebar/routes/Filelists/components/FilelistActionsMenu.tsx
+new file mode 100644
+index 0000000..ad4922c
+--- /dev/null
++++ b/src/routes/Sidebar/routes/Filelists/components/FilelistActionsMenu.tsx
+@@ -0,0 +1,62 @@
++import * as React from 'react';
++import { useTranslation } from 'react-i18next';
++
++import { ActionMenu } from '@/components/action-menu';
++import { useSelectedItems } from '@/components/table/selection';
++
++import {
++  FilelistSelectionActionMenu,
++  FilelistTableActionMenu,
++} from '@/actions/ui/filelist';
++import type { DownloadSelectionData } from '@/actions/ui/download-selection';
++
++import * as API from '@/types/api';
++import * as UI from '@/types/ui';
++import { toI18nKey } from '@/utils/TranslationUtils';
++
++interface FilelistActionsMenuProps {
++  sessionT: UI.ModuleTranslator;
++  filelist: API.FilelistSession;
++  onDownload: () => Promise<unknown>;
++  onDownloadTo: () => void;
++}
++
++// The actions menu in the table footer. The actions for the selected items
++// are available while there are selected items.
++export const FilelistActionsMenu: React.FC<FilelistActionsMenuProps> = ({
++  sessionT,
++  filelist,
++  onDownload,
++  onDownloadTo,
++}) => {
++  const { t } = useTranslation();
++  const items = useSelectedItems<API.FilelistItem>();
++
++  const selectionItemData: DownloadSelectionData = {
++    id: 'selection',
++    name: t(toI18nKey('xItems', UI.Modules.FILELISTS), {
++      defaultValue_one: '{{count}} item',
++      defaultValue_other: '{{count}} items',
++      count: items.length,
++      replace: { count: items.length },
++    }),
++    download: onDownload,
++    downloadTo: onDownloadTo,
++  };
++
++  return (
++    <ActionMenu
++      className="top left pointing"
++      caption={sessionT.translate('Actions...')}
++      actions={FilelistTableActionMenu}
++      header={sessionT.translate('Filelist actions')}
++      triggerIcon="chevron up"
++      button={true}
++      itemData={filelist}
++    >
++      {items.length > 0 && (
++        <ActionMenu actions={FilelistSelectionActionMenu} itemData={selectionItemData} />
++      )}
++    </ActionMenu>
++  );
++};
 diff --git a/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx b/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
-index cd4deba..a2463b4 100644
+index cd4deba..eb6096b 100644
 --- a/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
 +++ b/src/routes/Sidebar/routes/Filelists/components/FilelistItemTable.tsx
-@@ -29,6 +29,11 @@ import { FilelistItemActionMenu } from '@/actions/ui/filelist';
+@@ -26,9 +26,15 @@ import { RowWrapperCellChildProps } from '@/components/table/RowWrapperCell';
+ import { filelistDownloadHandler } from '@/services/api/FilelistApi';
+ import MenuConstants from '@/constants/MenuConstants';
+ import { FilelistItemActionMenu } from '@/actions/ui/filelist';
++import { FilelistActionsMenu } from './FilelistActionsMenu';
  import { useSessionStore } from '@/context/SessionStoreContext';
  import LinkButton from '@/components/semantic/LinkButton';
  import { noMouseFocusProps } from '@/utils/BrowserUtils';
@@ -2786,16 +2860,16 @@ index cd4deba..a2463b4 100644
  
  interface NameCellProps extends RowWrapperCellChildProps<string, API.FilelistItem> {
    filelist: API.FilelistSession;
-@@ -69,6 +74,8 @@ const NameCell: React.FC<NameCellProps> = ({
+@@ -69,6 +75,8 @@ const NameCell: React.FC<NameCellProps> = ({
  interface ListBrowserProps {
    filelist: API.FilelistSession;
    onClickDirectory: (path: string) => void;
-+  onDownload: () => void;
++  onDownload: () => Promise<unknown>;
 +  onDownloadTo: () => void;
    sessionT: UI.ModuleTranslator;
  }
  
-@@ -76,6 +83,8 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
+@@ -76,6 +84,8 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
    filelist,
    sessionT,
    onClickDirectory,
@@ -2804,7 +2878,7 @@ index cd4deba..a2463b4 100644
    ...other
  }) => {
    const rowClassNameGetter = (rowData: API.FilelistItem) => {
-@@ -130,8 +139,8 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
+@@ -130,8 +140,8 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
      return cellData;
    };
  
@@ -2814,11 +2888,21 @@ index cd4deba..a2463b4 100644
    return (
      <>
        <VirtualTable
-@@ -145,7 +154,16 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
+@@ -145,7 +155,26 @@ const FilelistItemTable: React.FC<ListBrowserProps> = ({
          textFilterProps={{
            autoFocus: true,
          }}
-+        footerData={<SelectionBar onDownload={onDownload} onDownloadTo={onDownloadTo} />}
++        footerData={
++          <>
++            <FilelistActionsMenu
++              sessionT={sessionT}
++              filelist={filelist}
++              onDownload={onDownload}
++              onDownloadTo={onDownloadTo}
++            />
++            <SelectionBar />
++          </>
++        }
        >
 +        <Column
 +          name="Select"
